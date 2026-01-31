@@ -36,6 +36,27 @@ impl PaneNode {
             ratios: vec![],
         };
     }
+    
+    /// Split a specific pane in the tree
+    pub fn split_pane(&mut self, target_pane_idx: usize, direction: SplitDirection, new_pane_idx: usize) -> bool {
+        match self {
+            PaneNode::Single(idx) if *idx == target_pane_idx => {
+                // Found the target pane, split it
+                self.split(direction, new_pane_idx);
+                true
+            }
+            PaneNode::Single(_) => false,
+            PaneNode::Split { children, .. } => {
+                // Try to find and split in children
+                for child in children.iter_mut() {
+                    if child.split_pane(target_pane_idx, direction, new_pane_idx) {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+    }
 
     /// Split with a specific ratio for the new pane (in percent).
     pub fn split_with_ratio(
@@ -199,12 +220,34 @@ impl PaneNode {
                 if pos < ratios.len() {
                     ratios.remove(pos);
                 }
+            } else {
+                // Recurse into children
+                for child in children.iter_mut() {
+                    child.close_pane(pane_idx);
+                }
             }
 
             // If only one child left, collapse to single
             if children.len() == 1 {
                 if let Some(child) = children.first() {
                     *self = (**child).clone();
+                }
+            }
+        }
+    }
+    
+    /// Reindex all pane indices after a pane is removed
+    /// All indices > removed_idx need to be decremented by 1
+    pub fn reindex_after_removal(&mut self, removed_idx: usize) {
+        match self {
+            PaneNode::Single(idx) => {
+                if *idx > removed_idx {
+                    *idx -= 1;
+                }
+            }
+            PaneNode::Split { children, .. } => {
+                for child in children.iter_mut() {
+                    child.reindex_after_removal(removed_idx);
                 }
             }
         }

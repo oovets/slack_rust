@@ -37,6 +37,9 @@ pub struct Settings {
 
     #[serde(default = "default_true")]
     pub show_timestamps: bool,
+
+    #[serde(default = "default_true")]
+    pub show_chat_list: bool,
 }
 
 impl Default for Settings {
@@ -48,6 +51,7 @@ impl Default for Settings {
             show_emojis: true,
             show_line_numbers: false,
             show_timestamps: true,
+            show_chat_list: true,
         }
     }
 }
@@ -257,5 +261,9 @@ impl Config {
 
     pub fn aliases_path(&self) -> PathBuf {
         self.config_dir.join("aliases.json")
+    }
+    
+    pub fn settings_path(&self) -> PathBuf {
+        self.config_dir.join("settings.json")
     }
 }

@@ -23,6 +23,9 @@ use app::App;
 async fn main() -> Result<()> {
     // Create app BEFORE entering TUI mode (so authentication can work)
     let mut app = App::new().await?;
+    
+    // Load chat history for saved panes
+    let _ = app.load_all_pane_histories().await;
 
     // Setup terminal
     enable_raw_mode()?;

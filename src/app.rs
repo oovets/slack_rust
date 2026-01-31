@@ -85,12 +85,40 @@ pub struct ChatInfo {
 
 fn forwarded_preview(attachments: &[SlackAttachment]) -> Option<String> {
     for att in attachments {
-        // Show only title for link previews, not the full text content
-        if let Some(title) = att.title.as_ref().filter(|t| !t.is_empty()) {
-            return Some(format!("🔗 {}", title));
-        }
+        // For URL previews and forwarded messages, show only title and author
+        // to avoid excessive text that causes scroll issues
+        let mut parts = Vec::new();
+        
+        // Add author name if present
         if let Some(author) = att.author_name.as_ref().filter(|a| !a.is_empty()) {
-            return Some(format!("📎 {}", author));
+            parts.push(format!("@{}", author));
+        }
+        
+        // Add title if present (main content for URL previews)
+        if let Some(title) = att.title.as_ref().filter(|t| !t.is_empty()) {
+            parts.push(title.clone());
+        }
+        
+        // Only add short text snippets, ignore long URL preview descriptions
+        if let Some(text) = att.text.as_ref().filter(|t| !t.is_empty()) {
+            // Only include text if it's reasonably short (likely a forwarded message, not a URL preview)
+            if text.len() <= 100 {
+                parts.push(text.clone());
+            }
+        }
+        
+        if !parts.is_empty() {
+            return Some(parts.join(" - "));
+        }
+        
+        // Fallback to shortened fallback text
+        if let Some(fallback) = att.fallback.as_ref().filter(|f| !f.is_empty()) {
+            let short_fallback = if fallback.len() > 100 {
+                format!("{}...", &fallback[..100])
+            } else {
+                fallback.clone()
+            };
+            return Some(short_fallback);
         }
     }
     None
@@ -177,11 +205,78 @@ impl App {
             show_emojis: app_state.settings.show_emojis,
             show_line_numbers: app_state.settings.show_line_numbers,
             show_timestamps: app_state.settings.show_timestamps,
-            show_chat_list: true,
+            show_chat_list: app_state.settings.show_chat_list,
             user_name_cache: std::collections::HashMap::new(),
         };
 
         Ok(app)
+    }
+    
+    /// Load chat history for all panes that have channels assigned
+    pub async fn load_all_pane_histories(&mut self) -> Result<()> {
+        // Collect channel IDs to load
+        let channels_to_load: Vec<(usize, String)> = self.panes
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, pane)| {
+                pane.channel_id_str.as_ref().map(|id| (idx, id.clone()))
+            })
+            .collect();
+        
+        for (pane_idx, channel_id) in channels_to_load {
+            // Load messages for this channel
+            match self.slack.get_conversation_history(&channel_id, 50).await {
+                Ok(messages) => {
+                    // Collect unique user IDs and resolve names in batch
+                    let mut name_cache: std::collections::HashMap<String, String> =
+                        std::collections::HashMap::new();
+                    for slack_msg in &messages {
+                        if let Some(ref uid) = slack_msg.user {
+                            if !name_cache.contains_key(uid) {
+                                let name = self.slack.resolve_user_name(uid).await;
+                                name_cache.insert(uid.clone(), name);
+                            }
+                        }
+                    }
+
+                    // Add messages to pane
+                    let pane = &mut self.panes[pane_idx];
+                    for slack_msg in messages.iter().rev() {
+                        let user_id = slack_msg.user.clone().unwrap_or_default();
+                        let sender_name = name_cache
+                            .get(&user_id)
+                            .cloned()
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        let reactions: Vec<(String, u32)> = slack_msg
+                            .reactions
+                            .iter()
+                            .map(|r| (r.name.clone(), r.count))
+                            .collect();
+                        let msg_data = crate::widgets::MessageData {
+                            sender_name,
+                            text: slack_msg.text.clone(),
+                            is_outgoing: slack_msg.user.as_deref() == Some(&self.my_user_id),
+                            ts: slack_msg.ts.clone(),
+                            reactions,
+                            reply_count: slack_msg.reply_count.unwrap_or(0),
+                            forwarded_text: forwarded_preview(&slack_msg.attachments),
+                        };
+                        pane.msg_data.push(msg_data);
+                    }
+                    
+                    // Auto-scroll to bottom
+                    pane.scroll_offset = usize::MAX;
+                }
+                Err(e) => {
+                    eprintln!("Failed to load messages for pane {}: {}", pane_idx, e);
+                }
+            }
+        }
+        
+        // Sync user name cache
+        self.user_name_cache = self.slack.get_user_name_cache().await;
+        
+        Ok(())
     }
 
     pub async fn process_slack_events(&mut self) -> Result<()> {
@@ -789,9 +884,10 @@ impl App {
                     }
                     let mut lines = (line_len / msg_area_width) + 1;
                     
-                    // Add one line for attachment preview if present
-                    if msg.forwarded_text.is_some() {
-                        lines += 1;
+                    // Add lines for quoted/forwarded message (max 3 lines)
+                    if let Some(ref fwd) = msg.forwarded_text {
+                        let fwd_lines = fwd.lines().count().min(3);
+                        lines += fwd_lines;
                     }
                     
                     lines
@@ -890,12 +986,28 @@ impl App {
 
             message_lines.push(Line::from(spans));
 
-            // Show attachment preview (title only, one line)
+            // Show quoted/forwarded message as indented block (max 3 lines)
             if let Some(ref fwd) = msg.forwarded_text {
-                message_lines.push(Line::from(Span::styled(
-                    format!("  {}", fwd),
-                    Style::default().fg(Color::Blue),
-                )));
+                // Split forwarded text into lines and show as quote (limit to 3 lines)
+                let mut line_count = 0;
+                for line in fwd.lines() {
+                    if line_count >= 3 {
+                        message_lines.push(Line::from(Span::styled(
+                            "│ ...",
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
+                        )));
+                        break;
+                    }
+                    message_lines.push(Line::from(Span::styled(
+                        format!("│ {}", line),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                    line_count += 1;
+                }
             }
         }
 
@@ -965,6 +1077,7 @@ impl App {
                 show_emojis: self.show_emojis,
                 show_line_numbers: self.show_line_numbers,
                 show_timestamps: self.show_timestamps,
+                show_chat_list: self.show_chat_list,
             },
             aliases: self.aliases.clone(),
             layout: LayoutData {
@@ -1118,13 +1231,23 @@ impl App {
     pub fn split_vertical(&mut self) {
         let new_idx = self.panes.len();
         self.panes.push(ChatPane::new());
-        self.pane_tree.split(SplitDirection::Vertical, new_idx);
+        // Split the focused pane, not the root
+        if !self.pane_tree.split_pane(self.focused_pane_idx, SplitDirection::Vertical, new_idx) {
+            // Fallback: split at root if focused pane not found
+            self.pane_tree.split(SplitDirection::Vertical, new_idx);
+        }
+        self.focused_pane_idx = new_idx; // Focus the new pane
     }
 
     pub fn split_horizontal(&mut self) {
         let new_idx = self.panes.len();
         self.panes.push(ChatPane::new());
-        self.pane_tree.split(SplitDirection::Horizontal, new_idx);
+        // Split the focused pane, not the root
+        if !self.pane_tree.split_pane(self.focused_pane_idx, SplitDirection::Horizontal, new_idx) {
+            // Fallback: split at root if focused pane not found
+            self.pane_tree.split(SplitDirection::Horizontal, new_idx);
+        }
+        self.focused_pane_idx = new_idx; // Focus the new pane
     }
 
     pub fn toggle_split_direction(&mut self) {
@@ -1132,12 +1255,43 @@ impl App {
     }
 
     pub fn close_pane(&mut self) {
-        if self.panes.len() <= 1 || self.focused_pane_idx == 0 {
-            self.set_status("Cannot close the main pane");
+        if self.panes.len() <= 1 {
+            self.set_status("Cannot close the last pane");
             return;
         }
-        self.pane_tree.close_pane(self.focused_pane_idx);
-        self.panes.remove(self.focused_pane_idx);
+        
+        let pane_idx = self.focused_pane_idx;
+        
+        // Get all pane indices before closing
+        let all_indices = self.pane_tree.get_pane_indices();
+        
+        // Find a new pane to focus on (prefer next pane, or previous if we're at the end)
+        let current_pos = all_indices.iter().position(|&idx| idx == pane_idx).unwrap_or(0);
+        let new_focus_idx = if current_pos + 1 < all_indices.len() {
+            all_indices[current_pos + 1]
+        } else if current_pos > 0 {
+            all_indices[current_pos - 1]
+        } else {
+            0
+        };
+        
+        // Remove the pane from the tree
+        self.pane_tree.close_pane(pane_idx);
+        
+        // Remove the pane from the array
+        self.panes.remove(pane_idx);
+        
+        // Reindex all pane indices in the tree (shift down indices > pane_idx)
+        self.pane_tree.reindex_after_removal(pane_idx);
+        
+        // Update focused pane index (adjust if it was after the removed pane)
+        self.focused_pane_idx = if new_focus_idx > pane_idx {
+            new_focus_idx - 1
+        } else {
+            new_focus_idx
+        };
+        
+        // Ensure focused index is valid
         if self.focused_pane_idx >= self.panes.len() {
             self.focused_pane_idx = self.panes.len().saturating_sub(1);
         }

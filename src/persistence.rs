@@ -140,6 +140,9 @@ pub struct AppSettings {
 
     #[serde(default = "default_true")]
     pub show_timestamps: bool,
+
+    #[serde(default = "default_true")]
+    pub show_chat_list: bool,
 }
 
 impl Default for AppSettings {
@@ -151,7 +154,28 @@ impl Default for AppSettings {
             show_emojis: true,
             show_line_numbers: false,
             show_timestamps: true,
+            show_chat_list: true,
         }
+    }
+}
+
+impl AppSettings {
+    pub fn load(config: &Config) -> Result<Self> {
+        let path = config.settings_path();
+        if path.exists() {
+            let content = fs::read_to_string(path)?;
+            let settings: AppSettings = serde_json::from_str(&content)?;
+            Ok(settings)
+        } else {
+            Ok(Self::default())
+        }
+    }
+
+    pub fn save(&self, config: &Config) -> Result<()> {
+        let path = config.settings_path();
+        let content = serde_json::to_string_pretty(self)?;
+        fs::write(path, content)?;
+        Ok(())
     }
 }
 
@@ -161,24 +185,28 @@ fn default_true() -> bool {
 
 impl AppState {
     pub fn load(config: &Config) -> Result<Self> {
+        // Try to load settings from a separate file, fallback to config
+        let settings = AppSettings::load(config).unwrap_or_else(|_| AppSettings {
+            show_reactions: config.settings.show_reactions,
+            show_notifications: config.settings.show_notifications,
+            compact_mode: config.settings.compact_mode,
+            show_emojis: config.settings.show_emojis,
+            show_line_numbers: config.settings.show_line_numbers,
+            show_timestamps: config.settings.show_timestamps,
+            show_chat_list: config.settings.show_chat_list,
+        });
+        
         Ok(Self {
-            settings: AppSettings {
-                show_reactions: config.settings.show_reactions,
-                show_notifications: config.settings.show_notifications,
-                compact_mode: config.settings.compact_mode,
-                show_emojis: config.settings.show_emojis,
-                show_line_numbers: config.settings.show_line_numbers,
-                show_timestamps: config.settings.show_timestamps,
-            },
+            settings,
             aliases: Aliases::load(config)?,
             layout: LayoutData::load(config)?,
         })
     }
 
     pub fn save(&self, config: &Config) -> Result<()> {
+        self.settings.save(config)?;
         self.aliases.save(config)?;
         self.layout.save(config)?;
-        // Settings are saved as part of config
         Ok(())
     }
 }
