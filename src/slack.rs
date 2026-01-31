@@ -20,6 +20,7 @@ pub enum SlackUpdate {
         thread_ts: Option<String>,
         is_bot: bool,
         is_self: bool,
+        forwarded: Option<String>,
     },
     UserTyping {
         channel_id: String,
@@ -107,6 +108,37 @@ pub struct SlackMessage {
     pub thread_ts: Option<String>,
     #[serde(default)]
     pub reply_count: Option<u32>,
+    #[serde(default)]
+    pub attachments: Vec<SlackAttachment>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct SlackAttachment {
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub fallback: Option<String>,
+    #[serde(default)]
+    pub pretext: Option<String>,
+    #[serde(default)]
+    pub author_name: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+fn extract_forwarded_text(attachments: &[SlackAttachment]) -> Option<String> {
+    for att in attachments {
+        if let Some(text) = att.text.as_ref().filter(|t| !t.is_empty()) {
+            return Some(text.clone());
+        }
+        if let Some(pretext) = att.pretext.as_ref().filter(|t| !t.is_empty()) {
+            return Some(pretext.clone());
+        }
+        if let Some(fallback) = att.fallback.as_ref().filter(|t| !t.is_empty()) {
+            return Some(fallback.clone());
+        }
+    }
+    None
 }
 
 #[derive(Deserialize)]
@@ -264,6 +296,11 @@ impl SlackClient {
                             .get("thread_ts")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
+                        let attachments: Vec<SlackAttachment> = event
+                            .get("attachments")
+                            .and_then(|a| serde_json::from_value(a.clone()).ok())
+                            .unwrap_or_default();
+                        let forwarded = extract_forwarded_text(&attachments);
 
                         let my_id = user_id.lock().await.clone().unwrap_or_default();
                         let is_self = !my_id.is_empty() && user_id_event == my_id;
@@ -285,6 +322,7 @@ impl SlackClient {
                             thread_ts,
                             is_bot,
                             is_self,
+                            forwarded,
                         });
                     }
                 }

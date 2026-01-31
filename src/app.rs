@@ -12,7 +12,7 @@ use crate::commands::CommandHandler;
 use crate::config::Config;
 use crate::formatting::{format_message_text, slack_emoji_to_unicode};
 use crate::persistence::{Aliases, AppState, LayoutData};
-use crate::slack::{SlackClient, SlackUpdate};
+use crate::slack::{SlackAttachment, SlackClient, SlackUpdate};
 use crate::split_view::{PaneNode, SplitDirection};
 use crate::utils::send_desktop_notification;
 use crate::widgets::ChatPane;
@@ -81,6 +81,21 @@ pub struct ChatInfo {
     pub username: Option<String>,
     pub unread: u32,
     pub section: ChatSection,
+}
+
+fn forwarded_preview(attachments: &[SlackAttachment]) -> Option<String> {
+    for att in attachments {
+        if let Some(text) = att.text.as_ref().filter(|t| !t.is_empty()) {
+            return Some(text.clone());
+        }
+        if let Some(pretext) = att.pretext.as_ref().filter(|t| !t.is_empty()) {
+            return Some(pretext.clone());
+        }
+        if let Some(fallback) = att.fallback.as_ref().filter(|t| !t.is_empty()) {
+            return Some(fallback.clone());
+        }
+    }
+    None
 }
 
 impl App {
@@ -184,33 +199,62 @@ impl App {
                     thread_ts,
                     is_bot,
                     is_self,
+                    forwarded,
                 } => {
+                    let is_thread_reply = matches!(thread_ts.as_ref(), Some(t) if t != &ts);
+                    let root_thread_ts = thread_ts.clone().unwrap_or_else(|| ts.clone());
+
                     // Update panes showing this channel/thread
                     let mut seen_in_open_pane = false;
                     for pane in &mut self.panes {
                         if let Some(ref pane_channel_id) = pane.channel_id_str {
                             if *pane_channel_id == channel_id {
-                                let thread_matches = match (&pane.thread_ts, &thread_ts) {
-                                    (Some(pane_thread), Some(msg_thread)) => {
-                                        pane_thread == msg_thread
+                                match &pane.thread_ts {
+                                    Some(pane_thread) => {
+                                        if let Some(msg_thread) = &thread_ts {
+                                            if pane_thread == msg_thread {
+                                                let msg_data = crate::widgets::MessageData {
+                                                    sender_name: user_name.clone(),
+                                                    text: text.clone(),
+                                                    is_outgoing: is_self,
+                                                    ts: ts.clone(),
+                                                    reactions: Vec::new(),
+                                                    reply_count: 0,
+                                                    forwarded_text: forwarded.clone(),
+                                                };
+                                                pane.msg_data.push(msg_data);
+                                                pane.format_cache.clear();
+                                                pane.scroll_offset = usize::MAX;
+                                                seen_in_open_pane = true;
+                                            }
+                                        }
                                     }
-                                    (Some(_), None) => false,
-                                    (None, _) => true,
-                                };
-
-                                if thread_matches {
-                                    let msg_data = crate::widgets::MessageData {
-                                        sender_name: user_name.clone(),
-                                        text: text.clone(),
-                                        is_outgoing: is_self,
-                                        ts: ts.clone(),
-                                        reactions: Vec::new(),
-                                        reply_count: 0,
-                                    };
-                                    pane.msg_data.push(msg_data);
-                                    pane.format_cache.clear();
-                                    pane.scroll_offset = usize::MAX;
-                                    seen_in_open_pane = true;
+                                    None => {
+                                        if is_thread_reply {
+                                            if let Some(parent) = pane
+                                                .msg_data
+                                                .iter_mut()
+                                                .find(|m| m.ts == root_thread_ts)
+                                            {
+                                                parent.reply_count =
+                                                    parent.reply_count.saturating_add(1);
+                                            }
+                                        } else {
+                                            let msg_data = crate::widgets::MessageData {
+                                                sender_name: user_name.clone(),
+                                                text: text.clone(),
+                                                is_outgoing: is_self,
+                                                ts: ts.clone(),
+                                                reactions: Vec::new(),
+                                                reply_count: 0,
+                                                forwarded_text: forwarded.clone(),
+                                            };
+                                            pane.msg_data.push(msg_data);
+                                            pane.format_cache.clear();
+                                            pane.scroll_offset = usize::MAX;
+                                            seen_in_open_pane = true;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -333,6 +377,7 @@ impl App {
                         ts: slack_msg.ts.clone(),
                         reactions,
                         reply_count: slack_msg.reply_count.unwrap_or(0),
+                        forwarded_text: forwarded_preview(&slack_msg.attachments),
                     };
                     pane.msg_data.push(msg_data);
                 }
@@ -406,6 +451,7 @@ impl App {
                         ts: slack_msg.ts.clone(),
                         reactions,
                         reply_count: 0,
+                        forwarded_text: forwarded_preview(&slack_msg.attachments),
                     };
                     pane.msg_data.push(msg_data);
                 }
@@ -838,6 +884,15 @@ impl App {
             }
 
             message_lines.push(Line::from(spans));
+
+            if let Some(ref fwd) = msg.forwarded_text {
+                for line in fwd.lines() {
+                    message_lines.push(Line::from(Span::styled(
+                        format!("> {}", line),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+            }
         }
 
         let messages = Paragraph::new(message_lines)

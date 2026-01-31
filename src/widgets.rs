@@ -16,6 +16,7 @@ pub struct MessageData {
     pub ts: String,                    // Slack timestamp string (for thread_ts)
     pub reactions: Vec<(String, u32)>, // (emoji_name, count)
     pub reply_count: u32,
+    pub forwarded_text: Option<String>,
 }
 
 pub struct ChatPane {
