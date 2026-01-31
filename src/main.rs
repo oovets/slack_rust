@@ -30,6 +30,7 @@ async fn main() -> Result<()> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    terminal.show_cursor()?; // Show cursor for input
 
     // Run app
     let _res = run_app(&mut terminal, &mut app).await;
@@ -186,8 +187,8 @@ async fn run_app<B: ratatui::backend::Backend>(
                         KeyCode::Esc => {
                             app.cancel_reply();
                         }
-                        // Character input
-                        KeyCode::Char(c) if !app.focus_on_chat_list => {
+                        // Character input (only when no control modifier)
+                        KeyCode::Char(c) if !app.focus_on_chat_list && !key.modifiers.contains(KeyModifiers::CONTROL) => {
                             app.input_char(c);
                         }
                         _ => {}

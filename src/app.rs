@@ -85,14 +85,12 @@ pub struct ChatInfo {
 
 fn forwarded_preview(attachments: &[SlackAttachment]) -> Option<String> {
     for att in attachments {
-        if let Some(text) = att.text.as_ref().filter(|t| !t.is_empty()) {
-            return Some(text.clone());
+        // Show only title for link previews, not the full text content
+        if let Some(title) = att.title.as_ref().filter(|t| !t.is_empty()) {
+            return Some(format!("🔗 {}", title));
         }
-        if let Some(pretext) = att.pretext.as_ref().filter(|t| !t.is_empty()) {
-            return Some(pretext.clone());
-        }
-        if let Some(fallback) = att.fallback.as_ref().filter(|t| !t.is_empty()) {
-            return Some(fallback.clone());
+        if let Some(author) = att.author_name.as_ref().filter(|a| !a.is_empty()) {
+            return Some(format!("📎 {}", author));
         }
     }
     None
@@ -789,7 +787,14 @@ impl App {
                     if self.show_timestamps {
                         line_len += 20; // approx timestamp width
                     }
-                    (line_len / msg_area_width) + 1
+                    let mut lines = (line_len / msg_area_width) + 1;
+                    
+                    // Add one line for attachment preview if present
+                    if msg.forwarded_text.is_some() {
+                        lines += 1;
+                    }
+                    
+                    lines
                 })
                 .sum()
         } else {
@@ -885,13 +890,12 @@ impl App {
 
             message_lines.push(Line::from(spans));
 
+            // Show attachment preview (title only, one line)
             if let Some(ref fwd) = msg.forwarded_text {
-                for line in fwd.lines() {
-                    message_lines.push(Line::from(Span::styled(
-                        format!("> {}", line),
-                        Style::default().fg(Color::DarkGray),
-                    )));
-                }
+                message_lines.push(Line::from(Span::styled(
+                    format!("  {}", fwd),
+                    Style::default().fg(Color::Blue),
+                )));
             }
         }
 
@@ -925,9 +929,26 @@ impl App {
 
         let input = Paragraph::new(pane.input_buffer.as_str())
             .block(Block::default().borders(Borders::ALL).title("Input"))
-            .style(input_style);
+            .style(input_style)
+            .wrap(Wrap { trim: false }); // Enable text wrapping in input
 
         f.render_widget(input, input_chunk);
+        
+        // Set cursor position in the active input box
+        if is_focused && !self.focus_on_chat_list {
+            // Calculate cursor position with wrapping support
+            let input_width = input_chunk.width.saturating_sub(2) as usize; // subtract borders
+            let text_len = pane.input_buffer.len();
+            
+            if input_width > 0 {
+                let cursor_line = text_len / input_width;
+                let cursor_col = text_len % input_width;
+                
+                let cursor_x = input_chunk.x + 1 + cursor_col as u16; // +1 for border
+                let cursor_y = input_chunk.y + 1 + cursor_line as u16; // +1 for border
+                f.set_cursor_position((cursor_x, cursor_y));
+            }
+        }
     }
 
     pub fn set_status(&mut self, message: &str) {
