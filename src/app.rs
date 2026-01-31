@@ -4,9 +4,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Padding, Paragraph, Wrap},
     Frame,
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::commands::CommandHandler;
 use crate::config::Config;
@@ -44,6 +46,8 @@ pub struct App {
     pub show_line_numbers: bool,
     pub show_timestamps: bool,
     pub show_chat_list: bool,
+    pub show_user_colors: bool,
+    pub show_borders: bool,
     pub user_name_cache: std::collections::HashMap<String, String>,
 }
 
@@ -66,6 +70,37 @@ impl ChatSection {
             ChatSection::Bot => "Bots & Apps",
         }
     }
+}
+
+/// Generate a consistent color for a username using a hash function
+fn username_color(username: &str) -> Color {
+    // Use a palette of distinct, readable colors
+    let colors = [
+        Color::Cyan,
+        Color::Green,
+        Color::Yellow,
+        Color::Blue,
+        Color::Magenta,
+        Color::LightCyan,
+        Color::LightGreen,
+        Color::LightYellow,
+        Color::LightBlue,
+        Color::LightMagenta,
+        Color::Rgb(255, 165, 0),  // Orange
+        Color::Rgb(147, 112, 219), // Purple
+        Color::Rgb(64, 224, 208),  // Turquoise
+        Color::Rgb(255, 105, 180), // Hot Pink
+        Color::Rgb(50, 205, 50),   // Lime Green
+        Color::Rgb(255, 215, 0),   // Gold
+    ];
+    
+    // Hash the username to get a consistent index
+    let mut hasher = DefaultHasher::new();
+    username.hash(&mut hasher);
+    let hash = hasher.finish();
+    
+    // Use modulo to select a color from the palette
+    colors[(hash as usize) % colors.len()]
 }
 
 #[derive(Clone)]
@@ -206,6 +241,8 @@ impl App {
             show_line_numbers: app_state.settings.show_line_numbers,
             show_timestamps: app_state.settings.show_timestamps,
             show_chat_list: app_state.settings.show_chat_list,
+            show_user_colors: app_state.settings.show_user_colors,
+            show_borders: app_state.settings.show_borders,
             user_name_cache: std::collections::HashMap::new(),
         };
 
@@ -797,7 +834,7 @@ impl App {
             })
             .collect();
 
-        let list = List::new(items).block(
+        let list_block = if self.show_borders {
             Block::default()
                 .borders(Borders::ALL)
                 .title(if self.focus_on_chat_list {
@@ -809,8 +846,11 @@ impl App {
                     Style::default().fg(Color::Cyan)
                 } else {
                     Style::default()
-                }),
-        );
+                })
+        } else {
+            Block::default()
+        };
+        let list = List::new(items).block(list_block);
 
         f.render_widget(list, area);
     }
@@ -862,7 +902,11 @@ impl App {
         header_text.push_str(&pane.header_text());
 
         let header = Paragraph::new(header_text)
-            .block(Block::default().borders(Borders::ALL))
+            .block(if self.show_borders {
+                Block::default().borders(Borders::ALL)
+            } else {
+                Block::default()
+            })
             .style(header_style);
         f.render_widget(header, chunks[0]);
 
@@ -903,6 +947,7 @@ impl App {
         let show_reactions = self.show_reactions;
         let show_line_numbers = self.show_line_numbers;
         let show_timestamps = self.show_timestamps;
+        let show_user_colors = self.show_user_colors;
         let user_cache = &self.user_name_cache;
         let resolve_user = |id: &str| -> String {
             user_cache
@@ -950,7 +995,17 @@ impl App {
                 ));
             }
 
-            spans.push(Span::styled(format!("{}: ", msg.sender_name), name_style));
+            // Use color-coded username for better visual distinction
+            let username_style = if msg.is_outgoing {
+                name_style  // Keep own messages with original style
+            } else if show_user_colors {
+                Style::default()
+                    .fg(username_color(&msg.sender_name))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                name_style  // Use default style if colors are disabled
+            };
+            spans.push(Span::styled(format!("{}: ", msg.sender_name), username_style));
             spans.push(Span::raw(formatted_text));
 
             // Thread reply indicator
@@ -1011,8 +1066,14 @@ impl App {
             }
         }
 
+        let messages_block = if self.show_borders {
+            Block::default().borders(Borders::ALL).title("Messages")
+        } else {
+            Block::default().padding(Padding::left(2))
+        };
+        
         let messages = Paragraph::new(message_lines)
-            .block(Block::default().borders(Borders::ALL).title("Messages"))
+            .block(messages_block)
             .wrap(Wrap { trim: false })
             .scroll((scroll_offset as u16, 0));
 
@@ -1039,8 +1100,13 @@ impl App {
             Style::default().fg(Color::Gray)
         };
 
+        let input_block = if self.show_borders {
+            Block::default().borders(Borders::ALL).title("Input")
+        } else {
+            Block::default()
+        };
         let input = Paragraph::new(pane.input_buffer.as_str())
-            .block(Block::default().borders(Borders::ALL).title("Input"))
+            .block(input_block)
             .style(input_style)
             .wrap(Wrap { trim: false }); // Enable text wrapping in input
 
@@ -1049,15 +1115,17 @@ impl App {
         // Set cursor position in the active input box
         if is_focused && !self.focus_on_chat_list {
             // Calculate cursor position with wrapping support
-            let input_width = input_chunk.width.saturating_sub(2) as usize; // subtract borders
+            let border_offset = if self.show_borders { 2 } else { 0 };
+            let input_width = input_chunk.width.saturating_sub(border_offset) as usize;
             let text_len = pane.input_buffer.len();
             
             if input_width > 0 {
                 let cursor_line = text_len / input_width;
                 let cursor_col = text_len % input_width;
                 
-                let cursor_x = input_chunk.x + 1 + cursor_col as u16; // +1 for border
-                let cursor_y = input_chunk.y + 1 + cursor_line as u16; // +1 for border
+                let border_padding = if self.show_borders { 1 } else { 0 };
+                let cursor_x = input_chunk.x + border_padding + cursor_col as u16;
+                let cursor_y = input_chunk.y + border_padding + cursor_line as u16;
                 f.set_cursor_position((cursor_x, cursor_y));
             }
         }
@@ -1078,6 +1146,8 @@ impl App {
                 show_line_numbers: self.show_line_numbers,
                 show_timestamps: self.show_timestamps,
                 show_chat_list: self.show_chat_list,
+                show_user_colors: self.show_user_colors,
+                show_borders: self.show_borders,
             },
             aliases: self.aliases.clone(),
             layout: LayoutData {
@@ -1341,13 +1411,25 @@ impl App {
         }
     }
 
+    pub fn toggle_user_colors(&mut self) {
+        self.show_user_colors = !self.show_user_colors;
+        for pane in &mut self.panes {
+            pane.format_cache.clear();
+        }
+    }
+
+    pub fn toggle_borders(&mut self) {
+        self.show_borders = !self.show_borders;
+    }
+
     pub fn handle_mouse_click(&mut self, x: u16, y: u16) {
         // Check if click is in chat list
         if let Some(area) = self.chat_list_area {
             if x >= area.x && x < area.x + area.width && y >= area.y && y < area.y + area.height {
                 self.focus_on_chat_list = true;
                 // Calculate which chat was clicked (accounting for scroll offset and border)
-                let relative_y = y.saturating_sub(area.y + 1); // +1 for border
+                let border_offset = if self.show_borders { 1 } else { 0 };
+                let relative_y = y.saturating_sub(area.y + border_offset);
                 let row_idx = relative_y as usize + self.chat_list_scroll_offset;
                 let rows = self.build_chat_list_rows();
                 if let Some(chat_idx) = Self::row_to_chat_idx(&rows, row_idx) {
