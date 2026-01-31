@@ -614,6 +614,8 @@ impl App {
             let mut handler = CommandHandler::new();
             handler.handle_command(self, &input).await?;
             self.panes[pane_idx].input_buffer.clear();
+            self.panes[pane_idx].input_cursor = 0;
+            self.panes[pane_idx].tab_complete_state = None;
             return Ok(());
         }
 
@@ -628,6 +630,8 @@ impl App {
                 Ok(_) => {
                     self.input_history.push(input.clone());
                     self.panes[pane_idx].input_buffer.clear();
+                    self.panes[pane_idx].input_cursor = 0;
+                    self.panes[pane_idx].tab_complete_state = None;
                 }
                 Err(e) => {
                     self.set_status(&format!("Failed to send: {}", e));
@@ -858,7 +862,7 @@ impl App {
     fn draw_chat_pane_impl(&self, f: &mut Frame, area: Rect, pane: &ChatPane, is_focused: bool) {
         let has_reply_preview = pane.reply_preview.is_some();
         let header_height = if !self.show_borders { 2 } else if self.compact_mode { 2 } else { 3 };
-        let input_height: u16 = 3; // blank line + input + blank line (or border+input+border)
+        let input_height: u16 = 5; // top margin + 3 lines + bottom margin
         let constraints = if has_reply_preview {
             vec![
                 Constraint::Length(header_height),
@@ -1082,33 +1086,38 @@ impl App {
             Style::default().fg(Color::Gray)
         };
 
-        // Render input with blank line above
+        // Render input with blank line above/below
         let top_margin: u16 = 1;
+        let bottom_margin: u16 = 1;
         let input_inner = Rect {
             x: input_chunk.x,
             y: input_chunk.y + top_margin,
             width: input_chunk.width,
-            height: 1,
+            height: input_chunk.height.saturating_sub(top_margin + bottom_margin),
         };
+        let (cursor_line, cursor_col) = cursor_visual_pos(
+            pane.input_buffer.as_str(),
+            pane.input_cursor,
+            input_inner.width as usize,
+        );
+        let input_scroll = if input_inner.height > 0 {
+            cursor_line.saturating_sub(input_inner.height as usize - 1)
+        } else {
+            0
+        };
+
         let input = Paragraph::new(pane.input_buffer.as_str())
             .style(input_style)
-            .wrap(Wrap { trim: false });
+            .wrap(Wrap { trim: false })
+            .scroll((input_scroll as u16, 0));
 
         f.render_widget(input, input_inner);
 
         // Set cursor position only when input is focused
         if is_focused && !self.focus_on_chat_list {
-            let input_width = input_inner.width as usize;
-            let text_len = pane.input_buffer.len();
-
-            if input_width > 0 {
-                let cursor_line = text_len / input_width;
-                let cursor_col = text_len % input_width;
-
-                let cursor_x = input_inner.x + cursor_col as u16;
-                let cursor_y = input_inner.y + cursor_line as u16;
-                f.set_cursor_position((cursor_x, cursor_y));
-            }
+            let cursor_y = input_inner.y + cursor_line.saturating_sub(input_scroll) as u16;
+            let cursor_x = input_inner.x + cursor_col as u16;
+            f.set_cursor_position((cursor_x, cursor_y));
         }
     }
 
@@ -1206,14 +1215,114 @@ impl App {
     }
 
     pub fn input_char(&mut self, c: char) {
-        self.panes[self.focused_pane_idx].input_buffer.push(c);
-        // Reset tab completion on any new input
-        self.panes[self.focused_pane_idx].tab_complete_state = None;
+        let pane = &mut self.panes[self.focused_pane_idx];
+        pane.input_buffer.insert(pane.input_cursor, c);
+        pane.input_cursor += c.len_utf8();
+        pane.tab_complete_state = None;
     }
 
     pub fn backspace(&mut self) {
-        self.panes[self.focused_pane_idx].input_buffer.pop();
-        self.panes[self.focused_pane_idx].tab_complete_state = None;
+        let pane = &mut self.panes[self.focused_pane_idx];
+        if pane.input_cursor == 0 {
+            return;
+        }
+        let prev = prev_char_boundary(&pane.input_buffer, pane.input_cursor);
+        pane.input_buffer.drain(prev..pane.input_cursor);
+        pane.input_cursor = prev;
+        pane.tab_complete_state = None;
+    }
+
+    pub fn delete_forward(&mut self) {
+        let pane = &mut self.panes[self.focused_pane_idx];
+        if pane.input_cursor >= pane.input_buffer.len() {
+            return;
+        }
+        let next = next_char_boundary(&pane.input_buffer, pane.input_cursor);
+        pane.input_buffer.drain(pane.input_cursor..next);
+        pane.tab_complete_state = None;
+    }
+
+    pub fn input_newline(&mut self) {
+        let pane = &mut self.panes[self.focused_pane_idx];
+        pane.input_buffer.insert(pane.input_cursor, '\n');
+        pane.input_cursor += 1;
+        pane.tab_complete_state = None;
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        let pane = &mut self.panes[self.focused_pane_idx];
+        if pane.input_cursor == 0 {
+            return;
+        }
+        pane.input_cursor = prev_char_boundary(&pane.input_buffer, pane.input_cursor);
+        pane.tab_complete_state = None;
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        let pane = &mut self.panes[self.focused_pane_idx];
+        if pane.input_cursor >= pane.input_buffer.len() {
+            return;
+        }
+        pane.input_cursor = next_char_boundary(&pane.input_buffer, pane.input_cursor);
+        pane.tab_complete_state = None;
+    }
+
+    pub fn move_cursor_home(&mut self) {
+        let pane = &mut self.panes[self.focused_pane_idx];
+        let (line_start, _) = line_bounds(&pane.input_buffer, pane.input_cursor);
+        pane.input_cursor = line_start;
+        pane.tab_complete_state = None;
+    }
+
+    pub fn move_cursor_end(&mut self) {
+        let pane = &mut self.panes[self.focused_pane_idx];
+        let (_, line_end) = line_bounds(&pane.input_buffer, pane.input_cursor);
+        pane.input_cursor = line_end;
+        pane.tab_complete_state = None;
+    }
+
+    pub fn move_cursor_up(&mut self) {
+        let pane = &mut self.panes[self.focused_pane_idx];
+        let (line_start, _) = line_bounds(&pane.input_buffer, pane.input_cursor);
+        if line_start == 0 {
+            return;
+        }
+        let target_col = column_in_line(&pane.input_buffer, line_start, pane.input_cursor);
+        let prev_line_end = line_start.saturating_sub(1);
+        let prev_line_start = pane.input_buffer[..prev_line_end]
+            .rfind('\n')
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        let new_cursor = index_from_column(
+            &pane.input_buffer,
+            prev_line_start,
+            prev_line_end,
+            target_col,
+        );
+        pane.input_cursor = new_cursor.min(pane.input_buffer.len());
+        pane.tab_complete_state = None;
+    }
+
+    pub fn move_cursor_down(&mut self) {
+        let pane = &mut self.panes[self.focused_pane_idx];
+        let (line_start, line_end) = line_bounds(&pane.input_buffer, pane.input_cursor);
+        if line_end >= pane.input_buffer.len() {
+            return;
+        }
+        let target_col = column_in_line(&pane.input_buffer, line_start, pane.input_cursor);
+        let next_line_start = line_end + 1;
+        let next_line_end = pane.input_buffer[next_line_start..]
+            .find('\n')
+            .map(|idx| next_line_start + idx)
+            .unwrap_or_else(|| pane.input_buffer.len());
+        let new_cursor = index_from_column(
+            &pane.input_buffer,
+            next_line_start,
+            next_line_end,
+            target_col,
+        );
+        pane.input_cursor = new_cursor.min(pane.input_buffer.len());
+        pane.tab_complete_state = None;
     }
 
     pub fn tab_complete(&mut self) {
@@ -1228,17 +1337,19 @@ impl App {
             }
             state.index = (state.index + 1) % state.candidates.len();
             let replacement = &state.candidates[state.index];
-            pane.input_buffer.truncate(state.start_pos);
-            pane.input_buffer.push_str(&format!("@{} ", replacement));
+            pane.input_buffer = format!("{}@{} {}", state.before, replacement, state.after);
+            pane.input_cursor = state.before.len() + replacement.len() + 2;
         } else {
-            // Find @prefix at cursor (end of input)
+            // Find @prefix at cursor
             let input = &pane.input_buffer;
-            let at_pos = input.rfind('@');
+            let cursor = pane.input_cursor.min(input.len());
+            let before_cursor = &input[..cursor];
+            let at_pos = before_cursor.rfind('@');
             if at_pos.is_none() {
                 return;
             }
             let at_pos = at_pos.unwrap();
-            let prefix = &input[at_pos + 1..];
+            let prefix = &before_cursor[at_pos + 1..];
             // Don't complete empty @ or if there's a space after @
             if prefix.is_empty() || prefix.contains(' ') {
                 return;
@@ -1260,12 +1371,14 @@ impl App {
             }
 
             let replacement = &candidates[0];
-            let start_pos = at_pos;
-            pane.input_buffer.truncate(start_pos);
-            pane.input_buffer.push_str(&format!("@{} ", replacement));
+            let before = input[..at_pos].to_string();
+            let after = input[cursor..].to_string();
+            pane.input_buffer = format!("{}@{} {}", before, replacement, after);
+            pane.input_cursor = before.len() + replacement.len() + 2;
 
             pane.tab_complete_state = Some(TabCompleteState {
-                start_pos,
+                before,
+                after,
                 candidates,
                 index: 0,
             });
@@ -1430,4 +1543,73 @@ impl App {
             }
         }
     }
+}
+
+fn prev_char_boundary(s: &str, idx: usize) -> usize {
+    s[..idx].char_indices().last().map(|(i, _)| i).unwrap_or(0)
+}
+
+fn next_char_boundary(s: &str, idx: usize) -> usize {
+    if idx >= s.len() {
+        return s.len();
+    }
+    let mut iter = s[idx..].char_indices();
+    iter.next();
+    if let Some((next_i, _)) = iter.next() {
+        idx + next_i
+    } else {
+        s.len()
+    }
+}
+
+fn line_bounds(s: &str, cursor: usize) -> (usize, usize) {
+    let cursor = cursor.min(s.len());
+    let line_start = s[..cursor]
+        .rfind('\n')
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+    let line_end = s[cursor..]
+        .find('\n')
+        .map(|idx| cursor + idx)
+        .unwrap_or_else(|| s.len());
+    (line_start, line_end)
+}
+
+fn column_in_line(s: &str, line_start: usize, cursor: usize) -> usize {
+    s[line_start..cursor.min(s.len())].chars().count()
+}
+
+fn index_from_column(s: &str, line_start: usize, line_end: usize, target_col: usize) -> usize {
+    let mut col = 0;
+    for (byte_idx, _) in s[line_start..line_end].char_indices() {
+        if col >= target_col {
+            return line_start + byte_idx;
+        }
+        col += 1;
+    }
+    line_end
+}
+
+fn cursor_visual_pos(s: &str, cursor: usize, width: usize) -> (usize, usize) {
+    if width == 0 {
+        return (0, 0);
+    }
+    let mut line = 0;
+    let mut col = 0;
+    for (byte_idx, ch) in s.char_indices() {
+        if byte_idx >= cursor {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+            continue;
+        }
+        col += 1;
+        if col >= width {
+            line += 1;
+            col = 0;
+        }
+    }
+    (line, col)
 }

@@ -38,12 +38,14 @@ pub struct ChatPane {
     pub pinned_message: Option<String>,
     pub format_cache: HashMap<FormatCacheKey, Vec<String>>,
     pub input_buffer: String, // Per-pane input buffer
+    pub input_cursor: usize,  // Byte index cursor into input_buffer
     pub tab_complete_state: Option<TabCompleteState>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TabCompleteState {
-    pub start_pos: usize,        // Position in input_buffer where @prefix starts
+    pub before: String,          // Text before @prefix
+    pub after: String,           // Text after cursor when tab completion started
     pub candidates: Vec<String>, // Matching names
     pub index: usize,            // Current candidate index
 }
@@ -81,6 +83,7 @@ impl ChatPane {
             online_status: String::new(),
             pinned_message: None,
             input_buffer: String::new(),
+            input_cursor: 0,
             format_cache: HashMap::new(),
             tab_complete_state: None,
         }
@@ -91,6 +94,7 @@ impl ChatPane {
         self.msg_data.clear();
         self.scroll_offset = 0;
         self.input_buffer.clear();
+        self.input_cursor = 0;
         self.format_cache.clear();
     }
 

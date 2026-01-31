@@ -41,7 +41,7 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
 - **Line Numbers**: Number each message for easy reference (toggle with `Ctrl+G`)
 - **Compact Mode**: Reduce spacing for more messages on screen (toggle with `Ctrl+D`)
 - **Color-Coded Usernames**: Each user gets a unique, consistent color for better visual distinction (toggle with `Ctrl+U`)
-- **Borderless Mode**: Remove all borders for a cleaner, minimalist interface (toggle with `Ctrl+B`)
+- **Borderless Mode**: Remove all borders for a cleaner, minimalist interface (toggle with `Ctrl+Y`)
 - **Formatting Cache**: Smart caching for smooth scrolling in long conversations
 
 ### Powerful Commands
@@ -63,6 +63,7 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
 ### Advanced Features
 - **Message Filtering**: Filter by sender, media content, or links to find what you need
 - **Tab Completion**: Press `Tab` to auto-complete user mentions when typing `@`
+- **Multi-line Input**: Compose longer messages with `Shift+Enter` and edit with cursor keys
 - **Reply Context**: Reply to specific messages with visual context
 - **Forwarded Messages**: View forwarded content and attachments
 - **User Cache**: Fast display with cached user names and info
@@ -125,11 +126,14 @@ Configuration files are stored in `~/.config/slack_client_rs/`:
 
 ### Navigation Basics
 - **Tab** – Switch between channel list and panes, or cycle through panes
-- **↑/↓** – Navigate in channel list or scroll messages in panes
+- **↑/↓** – Navigate in channel list, or move cursor in input (scroll when input is empty)
 - **PageUp/PageDown** – Scroll messages faster (10 lines at a time)
-- **Home** – Jump to the oldest message
-- **End** – Jump to the newest message
+- **Home/End** – Move cursor to start/end of the current input line
+- **Ctrl+Home/Ctrl+End** – Jump to oldest/newest message
+- **Left/Right** – Move cursor within the input line
+- **Delete/Backspace** – Delete character forward/backward in input
 - **Enter** – Open selected channel (in list) or send message (in pane)
+- **Shift+Enter** – Insert newline in input
 - **Esc** – Cancel reply or clear error messages
 
 **Note**: Scrolling only works when focus is on a pane (not on the channel list). Press **Tab** to switch focus from the channel list to your active pane.

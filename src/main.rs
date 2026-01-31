@@ -146,8 +146,13 @@ async fn run_app<B: ratatui::backend::Backend>(
                             }
                         }
                         // Enter: Send message (when focus on chat pane)
+                        // Shift+Enter: Insert newline
                         KeyCode::Enter if !app.focus_on_chat_list => {
-                            app.send_message().await?;
+                            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                app.input_newline();
+                            } else {
+                                app.send_message().await?;
+                            }
                         }
                         // Enter: Open chat (when focus on chat list)
                         KeyCode::Enter if app.focus_on_chat_list => {
@@ -158,14 +163,22 @@ async fn run_app<B: ratatui::backend::Backend>(
                             if app.focus_on_chat_list {
                                 app.select_previous_chat();
                             } else {
-                                app.scroll_up();
+                                if app.panes[app.focused_pane_idx].input_buffer.is_empty() {
+                                    app.scroll_up();
+                                } else {
+                                    app.move_cursor_up();
+                                }
                             }
                         }
                         KeyCode::Down => {
                             if app.focus_on_chat_list {
                                 app.select_next_chat();
                             } else {
-                                app.scroll_down();
+                                if app.panes[app.focused_pane_idx].input_buffer.is_empty() {
+                                    app.scroll_down();
+                                } else {
+                                    app.move_cursor_down();
+                                }
                             }
                         }
                         // Page Up/Down: Scroll faster
@@ -179,20 +192,39 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 app.page_down();
                             }
                         }
-                        // Home/End: Jump to top/bottom
+                        // Home/End: Move cursor to line start/end or jump to top/bottom (Ctrl)
                         KeyCode::Home => {
                             if !app.focus_on_chat_list {
-                                app.scroll_to_top();
+                                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                    app.scroll_to_top();
+                                } else {
+                                    app.move_cursor_home();
+                                }
                             }
                         }
                         KeyCode::End => {
                             if !app.focus_on_chat_list {
-                                app.scroll_to_bottom();
+                                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                    app.scroll_to_bottom();
+                                } else {
+                                    app.move_cursor_end();
+                                }
                             }
                         }
                         // Backspace: Delete character
                         KeyCode::Backspace if !app.focus_on_chat_list => {
                             app.backspace();
+                        }
+                        // Delete: Delete character forward
+                        KeyCode::Delete if !app.focus_on_chat_list => {
+                            app.delete_forward();
+                        }
+                        // Left/Right: Move cursor
+                        KeyCode::Left if !app.focus_on_chat_list => {
+                            app.move_cursor_left();
+                        }
+                        KeyCode::Right if !app.focus_on_chat_list => {
+                            app.move_cursor_right();
                         }
                         // Esc: Clear input or cancel reply
                         KeyCode::Esc => {
