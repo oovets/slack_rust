@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{Local, TimeZone};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -677,18 +678,21 @@ impl App {
 
     fn draw_chat_pane_impl(&self, f: &mut Frame, area: Rect, pane: &ChatPane, is_focused: bool) {
         let has_reply_preview = pane.reply_preview.is_some();
+        let header_height = if self.compact_mode { 2 } else { 3 };
+        let input_height = if self.compact_mode { 2 } else { 3 };
+        let reply_height = if self.compact_mode { 2 } else { 3 };
         let constraints = if has_reply_preview {
             vec![
-                Constraint::Length(3),
+                Constraint::Length(header_height),
                 Constraint::Min(0),
                 Constraint::Length(1),
-                Constraint::Length(3),
+                Constraint::Length(reply_height),
             ]
         } else {
             vec![
-                Constraint::Length(3),
+                Constraint::Length(header_height),
                 Constraint::Min(0),
-                Constraint::Length(3),
+                Constraint::Length(input_height),
             ]
         };
 
@@ -729,9 +733,16 @@ impl App {
         let total_wrapped_lines: usize = if msg_area_width > 0 {
             pane.msg_data
                 .iter()
-                .map(|msg| {
+                .enumerate()
+                .map(|(idx, msg)| {
                     // Rough estimate: prefix + text length / width, at least 1 line per message
-                    let line_len = msg.sender_name.len() + 5 + msg.text.len(); // #N name: text
+                    let mut line_len = msg.sender_name.len() + 2 + msg.text.len(); // name: text
+                    if self.show_line_numbers {
+                        line_len += format!("#{} ", idx + 1).len();
+                    }
+                    if self.show_timestamps {
+                        line_len += 20; // approx timestamp width
+                    }
                     (line_len / msg_area_width) + 1
                 })
                 .sum()
@@ -743,12 +754,22 @@ impl App {
 
         let show_emojis = self.show_emojis;
         let show_reactions = self.show_reactions;
+        let show_line_numbers = self.show_line_numbers;
+        let show_timestamps = self.show_timestamps;
         let user_cache = &self.user_name_cache;
         let resolve_user = |id: &str| -> String {
             user_cache
                 .get(id)
                 .cloned()
                 .unwrap_or_else(|| id.to_string())
+        };
+        let format_ts = |ts: &str| -> Option<String> {
+            if !show_timestamps {
+                return None;
+            }
+            let secs: i64 = ts.split('.').next()?.parse().ok()?;
+            let dt = Local.timestamp_opt(secs, 0).single()?;
+            Some(dt.format("%Y-%m-%d %H:%M").to_string())
         };
 
         // Messages with emojis, reactions, and thread indicators
@@ -766,14 +787,24 @@ impl App {
 
             let formatted_text = format_message_text(&msg.text, show_emojis, &resolve_user);
 
-            let mut spans = vec![
-                Span::styled(
+            let mut spans = Vec::new();
+
+            if show_line_numbers {
+                spans.push(Span::styled(
                     format!("#{} ", idx + 1),
                     Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(format!("{}: ", msg.sender_name), name_style),
-                Span::raw(formatted_text),
-            ];
+                ));
+            }
+
+            if let Some(ts_fmt) = format_ts(&msg.ts) {
+                spans.push(Span::styled(
+                    format!("[{}] ", ts_fmt),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+
+            spans.push(Span::styled(format!("{}: ", msg.sender_name), name_style));
+            spans.push(Span::raw(formatted_text));
 
             // Thread reply indicator
             if msg.reply_count > 0 {
