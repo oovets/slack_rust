@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    terminal.show_cursor()?; // Show cursor for input
+    terminal.hide_cursor()?; // Cursor shown only when input is focused
 
     // Run app
     let _res = run_app(&mut terminal, &mut app).await;
@@ -126,6 +126,14 @@ async fn run_app<B: ratatui::backend::Backend>(
                         // Ctrl+G: Toggle line numbers
                         KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             app.toggle_line_numbers();
+                        }
+                        // Ctrl+U: Toggle user colors
+                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.toggle_user_colors();
+                        }
+                        // Ctrl+Y: Toggle borders
+                        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.toggle_borders();
                         }
                         // Tab: Next pane / Switch to chat list
                         KeyCode::Tab => {

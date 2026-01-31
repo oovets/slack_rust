@@ -857,15 +857,14 @@ impl App {
 
     fn draw_chat_pane_impl(&self, f: &mut Frame, area: Rect, pane: &ChatPane, is_focused: bool) {
         let has_reply_preview = pane.reply_preview.is_some();
-        let header_height = if self.compact_mode { 2 } else { 3 };
-        let input_height = if self.compact_mode { 2 } else { 3 };
-        let reply_height = if self.compact_mode { 2 } else { 3 };
+        let header_height = if !self.show_borders { 2 } else if self.compact_mode { 2 } else { 3 };
+        let input_height: u16 = 3; // blank line + input + blank line (or border+input+border)
         let constraints = if has_reply_preview {
             vec![
                 Constraint::Length(header_height),
                 Constraint::Min(0),
                 Constraint::Length(1),
-                Constraint::Length(reply_height),
+                Constraint::Length(input_height),
             ]
         } else {
             vec![
@@ -910,38 +909,9 @@ impl App {
             .style(header_style);
         f.render_widget(header, chunks[0]);
 
-        // Estimate total wrapped lines for scroll calculation
-        let msg_area_height = chunks[1].height.saturating_sub(2) as usize; // borders
-        let msg_area_width = chunks[1].width.saturating_sub(2) as usize; // borders
-        let total_wrapped_lines: usize = if msg_area_width > 0 {
-            pane.msg_data
-                .iter()
-                .enumerate()
-                .map(|(idx, msg)| {
-                    // Rough estimate: prefix + text length / width, at least 1 line per message
-                    let mut line_len = msg.sender_name.len() + 2 + msg.text.len(); // name: text
-                    if self.show_line_numbers {
-                        line_len += format!("#{} ", idx + 1).len();
-                    }
-                    if self.show_timestamps {
-                        line_len += 20; // approx timestamp width
-                    }
-                    let mut lines = (line_len / msg_area_width) + 1;
-                    
-                    // Add lines for quoted/forwarded message (max 3 lines)
-                    if let Some(ref fwd) = msg.forwarded_text {
-                        let fwd_lines = fwd.lines().count().min(3);
-                        lines += fwd_lines;
-                    }
-                    
-                    lines
-                })
-                .sum()
-        } else {
-            pane.msg_data.len()
-        };
-        let max_scroll = total_wrapped_lines.saturating_sub(msg_area_height);
-        let scroll_offset = pane.scroll_offset.min(max_scroll);
+        let border_sub = if self.show_borders { 2 } else { 0 };
+        let msg_area_height = chunks[1].height.saturating_sub(border_sub) as usize;
+        let msg_area_width = chunks[1].width.saturating_sub(if self.show_borders { 2 } else { 4 }) as usize;
 
         let show_emojis = self.show_emojis;
         let show_reactions = self.show_reactions;
@@ -1066,12 +1036,24 @@ impl App {
             }
         }
 
+        // Calculate scroll based on actual rendered lines
+        let total_wrapped_lines: usize = if msg_area_width > 0 {
+            message_lines.iter().map(|line| {
+                let line_width: usize = line.spans.iter().map(|s| s.content.len()).sum();
+                (line_width / msg_area_width) + 1
+            }).sum()
+        } else {
+            message_lines.len()
+        };
+        let max_scroll = total_wrapped_lines.saturating_sub(msg_area_height);
+        let scroll_offset = pane.scroll_offset.min(max_scroll);
+
         let messages_block = if self.show_borders {
             Block::default().borders(Borders::ALL).title("Messages")
         } else {
             Block::default().padding(Padding::left(2))
         };
-        
+
         let messages = Paragraph::new(message_lines)
             .block(messages_block)
             .wrap(Wrap { trim: false })
@@ -1100,32 +1082,31 @@ impl App {
             Style::default().fg(Color::Gray)
         };
 
-        let input_block = if self.show_borders {
-            Block::default().borders(Borders::ALL).title("Input")
-        } else {
-            Block::default()
+        // Render input with blank line above
+        let top_margin: u16 = 1;
+        let input_inner = Rect {
+            x: input_chunk.x,
+            y: input_chunk.y + top_margin,
+            width: input_chunk.width,
+            height: 1,
         };
         let input = Paragraph::new(pane.input_buffer.as_str())
-            .block(input_block)
             .style(input_style)
-            .wrap(Wrap { trim: false }); // Enable text wrapping in input
+            .wrap(Wrap { trim: false });
 
-        f.render_widget(input, input_chunk);
-        
-        // Set cursor position in the active input box
+        f.render_widget(input, input_inner);
+
+        // Set cursor position only when input is focused
         if is_focused && !self.focus_on_chat_list {
-            // Calculate cursor position with wrapping support
-            let border_offset = if self.show_borders { 2 } else { 0 };
-            let input_width = input_chunk.width.saturating_sub(border_offset) as usize;
+            let input_width = input_inner.width as usize;
             let text_len = pane.input_buffer.len();
-            
+
             if input_width > 0 {
                 let cursor_line = text_len / input_width;
                 let cursor_col = text_len % input_width;
-                
-                let border_padding = if self.show_borders { 1 } else { 0 };
-                let cursor_x = input_chunk.x + border_padding + cursor_col as u16;
-                let cursor_y = input_chunk.y + border_padding + cursor_line as u16;
+
+                let cursor_x = input_inner.x + cursor_col as u16;
+                let cursor_y = input_inner.y + cursor_line as u16;
                 f.set_cursor_position((cursor_x, cursor_y));
             }
         }

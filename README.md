@@ -40,6 +40,8 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
 - **Timestamps**: Optional message timestamps (toggle with `Ctrl+T`)
 - **Line Numbers**: Number each message for easy reference (toggle with `Ctrl+G`)
 - **Compact Mode**: Reduce spacing for more messages on screen (toggle with `Ctrl+D`)
+- **Color-Coded Usernames**: Each user gets a unique, consistent color for better visual distinction (toggle with `Ctrl+U`)
+- **Borderless Mode**: Remove all borders for a cleaner, minimalist interface (toggle with `Ctrl+B`)
 - **Formatting Cache**: Smart caching for smooth scrolling in long conversations
 
 ### Powerful Commands
@@ -146,6 +148,8 @@ Configuration files are stored in `~/.config/slack_client_rs/`:
 - **Ctrl+T** – Toggle message timestamps
 - **Ctrl+G** – Toggle message line numbers
 - **Ctrl+D** – Toggle compact mode (reduced spacing)
+- **Ctrl+U** – Toggle color-coded usernames
+- **Ctrl+Y** – Toggle borders (for cleaner UI)
 
 ### System Commands
 - **Ctrl+R** – Refresh channel list
@@ -336,4 +340,4 @@ config/
 
 ## License
 
-This project is open source. See LICENSE file for details.
+This project is open source.
