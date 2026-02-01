@@ -223,6 +223,18 @@ pub fn convert_slack_links(text: &str) -> String {
     result
 }
 
+/// Remove skin-tone modifiers like :skin-tone-6: from text
+fn remove_skin_tone_modifiers(text: &str) -> String {
+    // Pattern: :skin-tone-X: where X is a digit
+    // Use a simple string replacement since we know the exact pattern
+    let mut result = text.to_string();
+    for i in 1..=6 {
+        let pattern = format!(":skin-tone-{}:", i);
+        result = result.replace(&pattern, "");
+    }
+    result
+}
+
 /// Format message text: convert links, mentions, and emojis.
 pub fn format_message_text(
     text: &str,
@@ -230,6 +242,7 @@ pub fn format_message_text(
     resolve_user: &impl Fn(&str) -> String,
 ) -> String {
     let mut out = convert_slack_links(text);
+    out = remove_skin_tone_modifiers(&out);
     out = convert_slack_mentions(&out, resolve_user);
     if show_emojis {
         out = convert_slack_emojis(&out);
