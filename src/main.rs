@@ -60,8 +60,17 @@ async fn run_app<B: ratatui::backend::Backend>(
     loop {
         terminal.draw(|f| app.draw(f))?;
 
+        // Ensure pane indices are valid (workspace switch may have changed pane count)
+        app.ensure_valid_pane_idx();
+
         // Process Slack events FIRST - check for new messages frequently
         app.process_slack_events().await?;
+
+        // Poll for workspace switch completion
+        if app.poll_workspace_switch() {
+            // New client is ready — reload pane histories too
+            let _ = app.load_all_pane_histories().await;
+        }
 
         // Handle pending chat refresh (from workspace switch)
         if app.pending_refresh_chats {
@@ -148,9 +157,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                         // Ctrl+1-9: Switch to workspace
                         KeyCode::Char(c @ '1'..='9') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             let workspace_idx = (c as u8 - b'1') as usize;
-                            if let Err(e) = app.switch_workspace(workspace_idx).await {
-                                app.set_status(&format!("Failed to switch workspace: {}", e));
-                            }
+                            app.switch_workspace(workspace_idx);
                         }
                         // Tab: Next pane / Switch to chat list
                         KeyCode::Tab => {

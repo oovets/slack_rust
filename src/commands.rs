@@ -68,7 +68,7 @@ impl CommandHandler {
             name if name.chars().all(|c| c.is_ascii_digit()) => {
                 if let Ok(num) = name.parse::<usize>() {
                     if num > 0 && num <= app.config.workspaces.len() {
-                        app.switch_workspace(num - 1).await?;
+                        app.switch_workspace(num - 1);
                     } else {
                         app.set_status(&format!("Invalid workspace number: {}", num));
                     }
@@ -271,7 +271,7 @@ impl CommandHandler {
         if let Ok(idx) = arg.parse::<usize>() {
             // Switch by number (1-indexed)
             if idx > 0 && idx <= app.config.workspaces.len() {
-                app.switch_workspace(idx - 1).await?;
+                app.switch_workspace(idx - 1);
             } else {
                 app.set_status(&format!("Invalid workspace number: {}", idx));
             }
@@ -282,7 +282,7 @@ impl CommandHandler {
                 .position(|ws| ws.name.eq_ignore_ascii_case(arg));
             
             if let Some(idx) = workspace_idx {
-                app.switch_workspace(idx).await?;
+                app.switch_workspace(idx);
             } else {
                 app.set_status(&format!("Workspace '{}' not found", arg));
             }

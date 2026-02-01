@@ -741,4 +741,11 @@ impl SlackClient {
         let mut updates = self.pending_updates.lock().await;
         std::mem::take(&mut *updates)
     }
+
+    /// Abort the background WebSocket task, cleaning up the leaked connection.
+    pub async fn shutdown(&self) {
+        if let Some(handle) = self.ws_handle.lock().await.take() {
+            handle.abort();
+        }
+    }
 }

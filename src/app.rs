@@ -38,6 +38,7 @@ pub struct App {
     pub chat_list_scroll_offset: usize,
     pub pending_open_chat: bool,
     pub pending_refresh_chats: bool,
+    pub pending_workspace_switch: Option<tokio::sync::oneshot::Receiver<Result<(SlackClient, String), String>>>,
 
     // Settings
     pub show_reactions: bool,
@@ -244,6 +245,7 @@ impl App {
             chat_list_scroll_offset: 0,
             pending_open_chat: false,
             pending_refresh_chats: false,
+            pending_workspace_switch: None,
             pane_areas: std::collections::HashMap::new(),
             show_reactions: app_state.settings.show_reactions,
             show_notifications: app_state.settings.show_notifications,
@@ -626,9 +628,13 @@ impl App {
         if input.starts_with('/') {
             let mut handler = CommandHandler::new();
             handler.handle_command(self, &input).await?;
-            self.panes[pane_idx].input_buffer.clear();
-            self.panes[pane_idx].input_cursor = 0;
-            self.panes[pane_idx].tab_complete_state = None;
+            // After handle_command, pane_idx might be invalid if workspace was switched
+            // Use focused_pane_idx which is always kept valid by ensure_valid_pane_idx
+            self.ensure_valid_pane_idx();
+            let idx = self.focused_pane_idx;
+            self.panes[idx].input_buffer.clear();
+            self.panes[idx].input_cursor = 0;
+            self.panes[idx].tab_complete_state = None;
             return Ok(());
         }
 
@@ -1609,43 +1615,40 @@ impl App {
         }
     }
 
-    pub async fn switch_workspace(&mut self, workspace_idx: usize) -> Result<()> {
+    pub fn switch_workspace(&mut self, workspace_idx: usize) {
         if workspace_idx >= self.config.workspaces.len() {
             self.set_status("Invalid workspace index");
-            return Ok(());
-        }
-        
-        if workspace_idx == self.config.active_workspace {
-            self.set_status("Already on this workspace");
-            return Ok(());
+            return;
         }
 
-        // Save current workspace state (layout with current workspace name)
+        if workspace_idx == self.config.active_workspace {
+            self.set_status("Already on this workspace");
+            return;
+        }
+
+        if self.pending_workspace_switch.is_some() {
+            self.set_status("Workspace switch already in progress");
+            return;
+        }
+
+        // Save current workspace state
         let _ = self.save_state();
+
+        // Shutdown old WebSocket task
+        let old_slack = self.slack.clone();
+        tokio::spawn(async move { old_slack.shutdown().await });
 
         // Update active workspace
         self.config.active_workspace = workspace_idx;
         let _ = self.config.save();
 
-        // Clone workspace info before mutable borrow
         let workspace_name = self.config.workspaces[workspace_idx].name.clone();
         let workspace_token = self.config.workspaces[workspace_idx].token.clone();
         let workspace_app_token = self.config.workspaces[workspace_idx].app_token.clone();
-        
-        // Create new SlackClient for the workspace
-        let slack = SlackClient::new(&workspace_token, &workspace_app_token).await?;
-        let my_user_id = slack.get_my_user_id().await?;
-        
-        // Start event listener
-        slack.start_event_listener(workspace_app_token).await?;
-        
-        // Update app state
-        self.slack = slack;
-        self.my_user_id = my_user_id;
-        
-        // Clear old chats immediately - will be populated in background
+
+        // Clear old chats and restore layout synchronously
         self.chats.clear();
-        
+
         // Load saved layout for this workspace
         let app_state = AppState::load(&self.config).unwrap_or_else(|_| AppState {
             settings: crate::persistence::AppSettings {
@@ -1662,7 +1665,7 @@ impl App {
             aliases: self.aliases.clone(),
             layout: LayoutData::default(),
         });
-        
+
         // Restore pane tree
         let (pane_tree, required_indices) = if let Some(saved_tree) = app_state.layout.pane_tree {
             let indices = saved_tree.get_pane_indices();
@@ -1673,13 +1676,13 @@ impl App {
             (tree, indices)
         };
         self.pane_tree = pane_tree;
-        
+
         // Restore panes
         let max_required_idx = required_indices.iter().max().copied().unwrap_or(0);
         let total_panes_needed = (max_required_idx + 1)
             .max(app_state.layout.panes.len())
             .max(1);
-        
+
         self.panes.clear();
         for i in 0..total_panes_needed {
             if let Some(ps) = app_state.layout.panes.get(i) {
@@ -1693,18 +1696,64 @@ impl App {
                 self.panes.push(ChatPane::new());
             }
         }
-        
+
         if app_state.layout.focused_pane < self.panes.len() {
             self.focused_pane_idx = app_state.layout.focused_pane;
         } else {
             self.focused_pane_idx = 0;
         }
-        
-        // Mark that we need to refresh chats
-        self.pending_refresh_chats = true;
-        
-        self.set_status(&format!("Switched to workspace: {}", workspace_name));
-        Ok(())
+
+        // Spawn async connection work in background
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let result = async {
+                let slack = SlackClient::new(&workspace_token, &workspace_app_token)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let my_user_id = slack.get_my_user_id().await.map_err(|e| e.to_string())?;
+                slack
+                    .start_event_listener(workspace_app_token)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok((slack, my_user_id))
+            }
+            .await;
+            let _ = tx.send(result);
+        });
+        self.pending_workspace_switch = Some(rx);
+
+        self.set_status(&format!("Connecting to workspace: {}...", workspace_name));
+    }
+
+    /// Called from the event loop to check if a background workspace switch completed.
+    pub fn poll_workspace_switch(&mut self) -> bool {
+        let rx = match self.pending_workspace_switch.as_mut() {
+            Some(rx) => rx,
+            None => return false,
+        };
+
+        match rx.try_recv() {
+            Ok(Ok((slack, my_user_id))) => {
+                self.slack = slack;
+                self.my_user_id = my_user_id;
+                self.pending_workspace_switch = None;
+                self.pending_refresh_chats = true;
+                let name = self.config.workspaces[self.config.active_workspace].name.clone();
+                self.set_status(&format!("Switched to workspace: {}", name));
+                true
+            }
+            Ok(Err(e)) => {
+                self.pending_workspace_switch = None;
+                self.set_status(&format!("Workspace switch failed: {}", e));
+                false
+            }
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => false,
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                self.pending_workspace_switch = None;
+                self.set_status("Workspace switch failed: task dropped");
+                false
+            }
+        }
     }
 
     pub fn get_workspace_list(&self) -> Vec<(usize, String, bool)> {
@@ -1725,7 +1774,7 @@ impl App {
         self.set_status(&msg);
     }
 
-    fn ensure_valid_pane_idx(&mut self) {
+    pub fn ensure_valid_pane_idx(&mut self) {
         if self.panes.is_empty() {
             self.panes.push(ChatPane::new());
             self.focused_pane_idx = 0;
