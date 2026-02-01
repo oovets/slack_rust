@@ -18,6 +18,7 @@ pub struct MessageData {
     pub reply_count: u32,
     pub forwarded_text: Option<String>,
     pub mentions_me: bool, // True if this message mentions the current user
+    pub local_echo_time: Option<std::time::Instant>, // When local echo was created
 }
 
 pub struct ChatPane {

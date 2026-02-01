@@ -331,6 +331,7 @@ impl App {
                             reply_count: slack_msg.reply_count.unwrap_or(0),
                             forwarded_text: forwarded_preview(&slack_msg.attachments),
                             mentions_me,
+                            local_echo_time: None,
                         };
                         pane.msg_data.push(msg_data);
                     }
@@ -390,10 +391,14 @@ impl App {
                                     Some(pane_thread) => {
                                         if let Some(msg_thread) = &thread_ts {
                                             if pane_thread == msg_thread {
-                                                // Remove local echo if this is our own message
+                                                // Remove local echo if this is our own message (only if recent)
                                                 if is_self {
+                                                    let now = std::time::Instant::now();
                                                     if let Some(pos) = pane.msg_data.iter().rposition(|m| {
-                                                        m.ts.ends_with(".local") && m.text == text && m.is_outgoing
+                                                        m.ts.ends_with(".local") 
+                                                        && m.text == text 
+                                                        && m.is_outgoing
+                                                        && m.local_echo_time.map_or(false, |t| now.duration_since(t).as_secs() < 10)
                                                     }) {
                                                         pane.msg_data.remove(pos);
                                                     }
@@ -408,6 +413,7 @@ impl App {
                                                     reply_count: 0,
                                                     forwarded_text: forwarded.clone(),
                                                     mentions_me,
+                                                    local_echo_time: None,
                                                 };
                                                 pane.msg_data.push(msg_data);
                                                 pane.invalidate_cache();
@@ -427,11 +433,16 @@ impl App {
                                                     parent.reply_count.saturating_add(1);
                                             }
                                         } else {
-                                            // Remove local echo if this is our own message
+                                            // Remove local echo if this is our own message (only if recent)
                                             if is_self {
+                                                let now = std::time::Instant::now();
                                                 // Find and remove the most recent local echo with matching text
+                                                // Only remove if it was created within the last 10 seconds
                                                 if let Some(pos) = pane.msg_data.iter().rposition(|m| {
-                                                    m.ts.ends_with(".local") && m.text == text && m.is_outgoing
+                                                    m.ts.ends_with(".local") 
+                                                    && m.text == text 
+                                                    && m.is_outgoing
+                                                    && m.local_echo_time.map_or(false, |t| now.duration_since(t).as_secs() < 10)
                                                 }) {
                                                     pane.msg_data.remove(pos);
                                                 }
@@ -446,6 +457,7 @@ impl App {
                                                 reply_count: 0,
                                                 forwarded_text: forwarded.clone(),
                                                 mentions_me,
+                                                local_echo_time: None,
                                             };
                                             pane.msg_data.push(msg_data);
                                             pane.invalidate_cache();
@@ -582,6 +594,7 @@ impl App {
                         reply_count: slack_msg.reply_count.unwrap_or(0),
                         forwarded_text: forwarded_preview(&slack_msg.attachments),
                         mentions_me,
+                        local_echo_time: None,
                     };
                     pane.msg_data.push(msg_data);
                 }
@@ -658,6 +671,7 @@ impl App {
                         reply_count: 0,
                         forwarded_text: forwarded_preview(&slack_msg.attachments),
                         mentions_me,
+                        local_echo_time: None,
                     };
                     pane.msg_data.push(msg_data);
                 }
@@ -717,6 +731,7 @@ impl App {
                 reply_count: 0,
                 forwarded_text: None,
                 mentions_me: false,
+                local_echo_time: Some(std::time::Instant::now()),
             };
             
             self.panes[pane_idx].msg_data.push(local_msg);
