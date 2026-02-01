@@ -84,6 +84,8 @@ struct Channel {
     #[serde(default)]
     is_archived: bool,
     #[serde(default)]
+    is_member: bool,
+    #[serde(default)]
     unread_count: Option<u32>,
 }
 
@@ -726,6 +728,12 @@ impl SlackClient {
             if ch.is_archived {
                 continue;
             }
+            
+            // Skip channels we're not a member of (except for DMs which don't have is_member)
+            if !ch.is_im && !ch.is_mpim && !ch.is_member {
+                continue;
+            }
+            
             // Skip DMs with deleted users
             if ch.is_im {
                 if let Some(ref uid) = ch.user {
