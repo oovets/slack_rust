@@ -1,0 +1,21 @@
+{
+  "workspaces": [
+    {
+      "name": "My Workspace",
+      "token": "xoxp-YOUR-USER-TOKEN-HERE",
+      "app_token": "xapp-YOUR-APP-TOKEN-HERE"
+    }
+  ],
+  "active_workspace": 0,
+  "settings": {
+    "show_reactions": true,
+    "show_notifications": true,
+    "compact_mode": false,
+    "show_emojis": true,
+    "show_line_numbers": false,
+    "show_timestamps": true,
+    "show_chat_list": true,
+    "show_user_colors": true,
+    "show_borders": true
+  }
+}
