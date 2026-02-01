@@ -879,9 +879,28 @@ impl App {
             .split(f.area());
 
         let (chat_area, pane_area) = if self.show_chat_list {
+            // Calculate dynamic width based on longest chat name
+            let max_name_len = self.chats.iter()
+                .map(|c| {
+                    let prefix = if c.unread > 0 { format!("({}) ", c.unread) } else { String::new() };
+                    let emoji = match c.section {
+                        ChatSection::Public => "# ",
+                        ChatSection::Private => "🔒 ",
+                        ChatSection::DirectMessage => "👤 ",
+                        ChatSection::Group => "👥 ",
+                        ChatSection::Bot => "🤖 ",
+                    };
+                    prefix.len() + emoji.len() + c.name.len()
+                })
+                .max()
+                .unwrap_or(20);
+            
+            // Add padding for borders and some breathing room
+            let chat_list_width = (max_name_len + 6).min(40).max(15) as u16;
+            
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
+                .constraints([Constraint::Length(chat_list_width), Constraint::Min(0)])
                 .split(outer[0]);
             (Some(chunks[0]), chunks[1])
         } else {
