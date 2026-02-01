@@ -63,6 +63,12 @@ async fn run_app<B: ratatui::backend::Backend>(
         // Process Slack events FIRST - check for new messages frequently
         app.process_slack_events().await?;
 
+        // Handle pending chat refresh (from workspace switch)
+        if app.pending_refresh_chats {
+            app.pending_refresh_chats = false;
+            let _ = app.refresh_chats().await;
+        }
+
         // Handle pending chat open (from mouse click)
         if app.pending_open_chat {
             app.pending_open_chat = false;
@@ -134,6 +140,17 @@ async fn run_app<B: ratatui::backend::Backend>(
                         // Ctrl+Y: Toggle borders
                         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             app.toggle_borders();
+                        }
+                        // Ctrl+N: Show workspace list
+                        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.show_workspace_list();
+                        }
+                        // Ctrl+1-9: Switch to workspace
+                        KeyCode::Char(c @ '1'..='9') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            let workspace_idx = (c as u8 - b'1') as usize;
+                            if let Err(e) = app.switch_workspace(workspace_idx).await {
+                                app.set_status(&format!("Failed to switch workspace: {}", e));
+                            }
                         }
                         // Tab: Next pane / Switch to chat list
                         KeyCode::Tab => {

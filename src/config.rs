@@ -4,12 +4,18 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {
+pub struct Workspace {
+    pub name: String,
     // Support both 'token' (from Python client) and 'bot_token' (legacy)
     #[serde(alias = "bot_token")]
     pub token: String,
     pub app_token: String, // For Socket Mode
-    pub workspace_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    pub workspaces: Vec<Workspace>,
+    pub active_workspace: usize,
 
     #[serde(default)]
     pub settings: Settings,
@@ -76,9 +82,46 @@ impl Config {
         // If Rust config exists, use it
         if config_path.exists() {
             let content = fs::read_to_string(&config_path)?;
-            let mut config: Config = serde_json::from_str(&content)?;
-            config.config_dir = config_dir;
-            return Ok(config);
+            
+            // Try to load as new multi-workspace format first
+            if let Ok(mut config) = serde_json::from_str::<Config>(&content) {
+                config.config_dir = config_dir;
+                // Ensure active_workspace is within bounds
+                if config.active_workspace >= config.workspaces.len() {
+                    config.active_workspace = 0;
+                }
+                return Ok(config);
+            }
+            
+            // If that fails, try to load old format and convert it
+            #[derive(Deserialize)]
+            struct OldConfig {
+                #[serde(alias = "bot_token")]
+                token: String,
+                app_token: String,
+                workspace_name: Option<String>,
+                #[serde(default)]
+                settings: Settings,
+            }
+            
+            if let Ok(old_config) = serde_json::from_str::<OldConfig>(&content) {
+                let workspace = Workspace {
+                    name: old_config.workspace_name.unwrap_or_else(|| "Default".to_string()),
+                    token: old_config.token,
+                    app_token: old_config.app_token,
+                };
+                
+                let config = Config {
+                    workspaces: vec![workspace],
+                    active_workspace: 0,
+                    settings: old_config.settings,
+                    config_dir: config_dir.clone(),
+                };
+                
+                // Save in new format
+                let _ = config.save();
+                return Ok(config);
+            }
         }
 
         // If Rust config doesn't exist, try to copy from Python client's config
@@ -115,10 +158,14 @@ impl Config {
                                     }
 
                                     // Create config with copied credentials
-                                    let config = Config {
+                                    let workspace = Workspace {
+                                        name: "Default".to_string(),
                                         token,
                                         app_token,
-                                        workspace_name: None,
+                                    };
+                                    let config = Config {
+                                        workspaces: vec![workspace],
+                                        active_workspace: 0,
                                         settings: Settings::default(),
                                         config_dir: config_dir.clone(),
                                     };
@@ -202,8 +249,18 @@ impl Config {
         println!("  2. App-Level Token for Socket Mode (xapp-...)");
         println!();
 
-        print!("Enter Token (xoxp-... or xoxb-...): ");
+        print!("Workspace name: ");
         use std::io::{self, Write};
+        io::stdout().flush()?;
+        let mut workspace_name = String::new();
+        io::stdin().read_line(&mut workspace_name)?;
+        let workspace_name = if workspace_name.trim().is_empty() {
+            "Default".to_string()
+        } else {
+            workspace_name.trim().to_string()
+        };
+
+        print!("Enter Token (xoxp-... or xoxb-...): ");
         io::stdout().flush()?;
         let mut token = String::new();
         io::stdin().read_line(&mut token)?;
@@ -215,20 +272,15 @@ impl Config {
         io::stdin().read_line(&mut app_token)?;
         let app_token = app_token.trim().to_string();
 
-        print!("Workspace name (optional): ");
-        io::stdout().flush()?;
-        let mut workspace_name = String::new();
-        io::stdin().read_line(&mut workspace_name)?;
-        let workspace_name = if workspace_name.trim().is_empty() {
-            None
-        } else {
-            Some(workspace_name.trim().to_string())
+        let workspace = Workspace {
+            name: workspace_name,
+            token,
+            app_token,
         };
 
         let config = Config {
-            token,
-            app_token,
-            workspace_name,
+            workspaces: vec![workspace],
+            active_workspace: 0,
             settings: Settings::default(),
             config_dir: config_dir.clone(),
         };
@@ -264,7 +316,14 @@ impl Config {
     }
 
     pub fn layout_path(&self) -> PathBuf {
-        self.config_dir.join("layout.json")
+        // Use workspace-specific layout files
+        let workspace_name = if self.workspaces.is_empty() {
+            "default".to_string()
+        } else {
+            let idx = self.active_workspace.min(self.workspaces.len().saturating_sub(1));
+            self.workspaces[idx].name.clone()
+        };
+        self.config_dir.join(format!("layout_{}.json", workspace_name))
     }
 
     pub fn aliases_path(&self) -> PathBuf {

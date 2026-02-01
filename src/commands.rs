@@ -55,11 +55,26 @@ impl CommandHandler {
             "unalias" => {
                 Self::handle_unalias(app, &cmd).await?;
             }
+            "workspace" | "ws" => {
+                Self::handle_workspace(app, &cmd).await?;
+            }
             "leave" => {
                 Self::handle_leave(app).await?;
             }
             "help" | "h" => {
                 Self::handle_help(app).await?;
+            }
+            // /1, /2, /3... for quick workspace switching
+            name if name.chars().all(|c| c.is_ascii_digit()) => {
+                if let Ok(num) = name.parse::<usize>() {
+                    if num > 0 && num <= app.config.workspaces.len() {
+                        app.switch_workspace(num - 1).await?;
+                    } else {
+                        app.set_status(&format!("Invalid workspace number: {}", num));
+                    }
+                } else {
+                    app.set_status(&format!("Unknown command: /{}", cmd.name));
+                }
             }
             _ => {
                 app.set_status(&format!("Unknown command: /{}", cmd.name));
@@ -244,8 +259,40 @@ impl CommandHandler {
         Ok(())
     }
 
+    async fn handle_workspace(app: &mut App, cmd: &Command) -> Result<()> {
+        if cmd.args.is_empty() {
+            // Show workspace list
+            app.show_workspace_list();
+            return Ok(());
+        }
+
+        // Switch to workspace by number or name
+        let arg = &cmd.args[0];
+        if let Ok(idx) = arg.parse::<usize>() {
+            // Switch by number (1-indexed)
+            if idx > 0 && idx <= app.config.workspaces.len() {
+                app.switch_workspace(idx - 1).await?;
+            } else {
+                app.set_status(&format!("Invalid workspace number: {}", idx));
+            }
+        } else {
+            // Switch by name
+            let workspace_idx = app.config.workspaces
+                .iter()
+                .position(|ws| ws.name.eq_ignore_ascii_case(arg));
+            
+            if let Some(idx) = workspace_idx {
+                app.switch_workspace(idx).await?;
+            } else {
+                app.set_status(&format!("Workspace '{}' not found", arg));
+            }
+        }
+
+        Ok(())
+    }
+
     async fn handle_help(app: &mut App) -> Result<()> {
-        app.set_status("Commands: /thread N | /react <emoji> | /filter | /leave | /alias | /help");
+        app.set_status("Commands: /thread N | /react <emoji> | /filter | /workspace | /leave | /alias | /help");
         Ok(())
     }
 }

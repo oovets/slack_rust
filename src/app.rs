@@ -37,6 +37,7 @@ pub struct App {
     pub chat_list_area: Option<Rect>,
     pub chat_list_scroll_offset: usize,
     pub pending_open_chat: bool,
+    pub pending_refresh_chats: bool,
 
     // Settings
     pub show_reactions: bool,
@@ -162,11 +163,20 @@ fn forwarded_preview(attachments: &[SlackAttachment]) -> Option<String> {
 impl App {
     pub async fn new() -> Result<Self> {
         let config = Config::load()?;
-        let slack = SlackClient::new(&config).await?;
+        
+        // Get the active workspace
+        if config.workspaces.is_empty() {
+            return Err(anyhow::anyhow!("No workspaces configured"));
+        }
+        // Ensure active_workspace is within bounds
+        let active_idx = config.active_workspace.min(config.workspaces.len() - 1);
+        let workspace = &config.workspaces[active_idx];
+        
+        let slack = SlackClient::new(&workspace.token, &workspace.app_token).await?;
         let my_user_id = slack.get_my_user_id().await?;
 
         // Start event listener
-        slack.start_event_listener(config.app_token.clone()).await?;
+        slack.start_event_listener(workspace.app_token.clone()).await?;
 
         let app_state = AppState::load(&config).unwrap_or_else(|_| AppState {
             settings: crate::persistence::AppSettings::default(),
@@ -233,6 +243,7 @@ impl App {
             chat_list_area: None,
             chat_list_scroll_offset: 0,
             pending_open_chat: false,
+            pending_refresh_chats: false,
             pane_areas: std::collections::HashMap::new(),
             show_reactions: app_state.settings.show_reactions,
             show_notifications: app_state.settings.show_notifications,
@@ -262,7 +273,7 @@ impl App {
         
         for (pane_idx, channel_id) in channels_to_load {
             // Load messages for this channel
-            match self.slack.get_conversation_history(&channel_id, 50).await {
+            match self.slack.get_conversation_history(&channel_id, 100).await {
                 Ok(messages) => {
                     // Collect unique user IDs and resolve names in batch
                     let mut name_cache: std::collections::HashMap<String, String> =
@@ -453,6 +464,7 @@ impl App {
     }
 
     pub async fn open_selected_chat(&mut self) -> Result<()> {
+        self.ensure_valid_pane_idx();
         if self.selected_chat_idx >= self.chats.len() {
             return Ok(());
         }
@@ -475,7 +487,7 @@ impl App {
         }
 
         // Load messages
-        match self.slack.get_conversation_history(&chat.id, 50).await {
+        match self.slack.get_conversation_history(&chat.id, 100).await {
             Ok(messages) => {
                 // Collect unique user IDs and resolve names in batch
                 let mut name_cache: std::collections::HashMap<String, String> =
@@ -547,7 +559,7 @@ impl App {
         // Load thread replies
         match self
             .slack
-            .get_thread_replies(channel_id_str, thread_ts, 50)
+            .get_thread_replies(channel_id_str, thread_ts, 100)
             .await
         {
             Ok(messages) => {
@@ -602,6 +614,7 @@ impl App {
     }
 
     pub async fn send_message(&mut self) -> Result<()> {
+        self.ensure_valid_pane_idx();
         let pane_idx = self.focused_pane_idx;
         let input = self.panes[pane_idx].input_buffer.trim().to_string();
 
@@ -1187,10 +1200,12 @@ impl App {
     }
 
     pub fn scroll_up(&mut self) {
+        self.ensure_valid_pane_idx();
         self.panes[self.focused_pane_idx].scroll_up();
     }
 
     pub fn scroll_down(&mut self) {
+        self.ensure_valid_pane_idx();
         self.panes[self.focused_pane_idx].scroll_down();
     }
 
@@ -1215,6 +1230,7 @@ impl App {
     }
 
     pub fn input_char(&mut self, c: char) {
+        self.ensure_valid_pane_idx();
         let pane = &mut self.panes[self.focused_pane_idx];
         pane.input_buffer.insert(pane.input_cursor, c);
         pane.input_cursor += c.len_utf8();
@@ -1222,6 +1238,7 @@ impl App {
     }
 
     pub fn backspace(&mut self) {
+        self.ensure_valid_pane_idx();
         let pane = &mut self.panes[self.focused_pane_idx];
         if pane.input_cursor == 0 {
             return;
@@ -1243,6 +1260,7 @@ impl App {
     }
 
     pub fn input_newline(&mut self) {
+        self.ensure_valid_pane_idx();
         let pane = &mut self.panes[self.focused_pane_idx];
         pane.input_buffer.insert(pane.input_cursor, '\n');
         pane.input_cursor += 1;
@@ -1328,6 +1346,7 @@ impl App {
     pub fn tab_complete(&mut self) {
         use crate::widgets::TabCompleteState;
 
+        self.ensure_valid_pane_idx();
         let pane = &mut self.panes[self.focused_pane_idx];
 
         if let Some(ref mut state) = pane.tab_complete_state {
@@ -1337,13 +1356,59 @@ impl App {
             }
             state.index = (state.index + 1) % state.candidates.len();
             let replacement = &state.candidates[state.index];
-            pane.input_buffer = format!("{}@{} {}", state.before, replacement, state.after);
-            pane.input_cursor = state.before.len() + replacement.len() + 2;
+            
+            if state.before.starts_with('/') {
+                // Command completion
+                pane.input_buffer = format!("/{} {}", replacement, state.after);
+                pane.input_cursor = replacement.len() + 2;
+            } else {
+                // User mention completion
+                pane.input_buffer = format!("{}@{} {}", state.before, replacement, state.after);
+                pane.input_cursor = state.before.len() + replacement.len() + 2;
+            }
         } else {
-            // Find @prefix at cursor
             let input = &pane.input_buffer;
             let cursor = pane.input_cursor.min(input.len());
             let before_cursor = &input[..cursor];
+            
+            // Check if completing a command
+            if before_cursor.starts_with('/') && !before_cursor.contains(' ') {
+                let prefix = &before_cursor[1..];
+                let prefix_lower = prefix.to_lowercase();
+                
+                // All available commands
+                let commands = vec![
+                    "thread", "t", "react", "filter", "alias", "unalias",
+                    "workspace", "ws", "leave", "help", "h"
+                ];
+                
+                let mut candidates: Vec<String> = commands
+                    .into_iter()
+                    .filter(|cmd| cmd.starts_with(&prefix_lower))
+                    .map(|s| s.to_string())
+                    .collect();
+                    
+                if candidates.is_empty() {
+                    return;
+                }
+                
+                candidates.sort();
+                let after = input[cursor..].to_string();
+                let replacement = &candidates[0];
+                
+                pane.input_buffer = format!("/{} {}", replacement, after);
+                pane.input_cursor = replacement.len() + 2;
+                
+                pane.tab_complete_state = Some(TabCompleteState {
+                    before: "/".to_string(),
+                    after,
+                    candidates,
+                    index: 0,
+                });
+                return;
+            }
+            
+            // Find @prefix at cursor for user mentions
             let at_pos = before_cursor.rfind('@');
             if at_pos.is_none() {
                 return;
@@ -1541,6 +1606,131 @@ impl App {
                 self.focus_on_chat_list = false;
                 return;
             }
+        }
+    }
+
+    pub async fn switch_workspace(&mut self, workspace_idx: usize) -> Result<()> {
+        if workspace_idx >= self.config.workspaces.len() {
+            self.set_status("Invalid workspace index");
+            return Ok(());
+        }
+        
+        if workspace_idx == self.config.active_workspace {
+            self.set_status("Already on this workspace");
+            return Ok(());
+        }
+
+        // Save current workspace state (layout with current workspace name)
+        let _ = self.save_state();
+
+        // Update active workspace
+        self.config.active_workspace = workspace_idx;
+        let _ = self.config.save();
+
+        // Clone workspace info before mutable borrow
+        let workspace_name = self.config.workspaces[workspace_idx].name.clone();
+        let workspace_token = self.config.workspaces[workspace_idx].token.clone();
+        let workspace_app_token = self.config.workspaces[workspace_idx].app_token.clone();
+        
+        // Create new SlackClient for the workspace
+        let slack = SlackClient::new(&workspace_token, &workspace_app_token).await?;
+        let my_user_id = slack.get_my_user_id().await?;
+        
+        // Start event listener
+        slack.start_event_listener(workspace_app_token).await?;
+        
+        // Update app state
+        self.slack = slack;
+        self.my_user_id = my_user_id;
+        
+        // Clear old chats immediately - will be populated in background
+        self.chats.clear();
+        
+        // Load saved layout for this workspace
+        let app_state = AppState::load(&self.config).unwrap_or_else(|_| AppState {
+            settings: crate::persistence::AppSettings {
+                show_reactions: self.show_reactions,
+                show_notifications: self.show_notifications,
+                compact_mode: self.compact_mode,
+                show_emojis: self.show_emojis,
+                show_line_numbers: self.show_line_numbers,
+                show_timestamps: self.show_timestamps,
+                show_chat_list: self.show_chat_list,
+                show_user_colors: self.show_user_colors,
+                show_borders: self.show_borders,
+            },
+            aliases: self.aliases.clone(),
+            layout: LayoutData::default(),
+        });
+        
+        // Restore pane tree
+        let (pane_tree, required_indices) = if let Some(saved_tree) = app_state.layout.pane_tree {
+            let indices = saved_tree.get_pane_indices();
+            (saved_tree, indices)
+        } else {
+            let tree = PaneNode::new_single(0);
+            let indices = tree.get_pane_indices();
+            (tree, indices)
+        };
+        self.pane_tree = pane_tree;
+        
+        // Restore panes
+        let max_required_idx = required_indices.iter().max().copied().unwrap_or(0);
+        let total_panes_needed = (max_required_idx + 1)
+            .max(app_state.layout.panes.len())
+            .max(1);
+        
+        self.panes.clear();
+        for i in 0..total_panes_needed {
+            if let Some(ps) = app_state.layout.panes.get(i) {
+                let mut pane = ChatPane::new();
+                pane.chat_id = ps.chat_id;
+                pane.channel_id_str = ps.channel_id.clone();
+                pane.chat_name = ps.chat_name.clone();
+                pane.scroll_offset = ps.scroll_offset;
+                self.panes.push(pane);
+            } else {
+                self.panes.push(ChatPane::new());
+            }
+        }
+        
+        if app_state.layout.focused_pane < self.panes.len() {
+            self.focused_pane_idx = app_state.layout.focused_pane;
+        } else {
+            self.focused_pane_idx = 0;
+        }
+        
+        // Mark that we need to refresh chats
+        self.pending_refresh_chats = true;
+        
+        self.set_status(&format!("Switched to workspace: {}", workspace_name));
+        Ok(())
+    }
+
+    pub fn get_workspace_list(&self) -> Vec<(usize, String, bool)> {
+        self.config.workspaces
+            .iter()
+            .enumerate()
+            .map(|(idx, ws)| (idx, ws.name.clone(), idx == self.config.active_workspace))
+            .collect()
+    }
+
+    pub fn show_workspace_list(&mut self) {
+        let workspaces = self.get_workspace_list();
+        let mut msg = String::from("Workspaces (Ctrl+1-9 to switch):\n");
+        for (idx, name, is_active) in workspaces {
+            let marker = if is_active { "* " } else { "  " };
+            msg.push_str(&format!("{}{}. {}\n", marker, idx + 1, name));
+        }
+        self.set_status(&msg);
+    }
+
+    fn ensure_valid_pane_idx(&mut self) {
+        if self.panes.is_empty() {
+            self.panes.push(ChatPane::new());
+            self.focused_pane_idx = 0;
+        } else if self.focused_pane_idx >= self.panes.len() {
+            self.focused_pane_idx = self.panes.len() - 1;
         }
     }
 }

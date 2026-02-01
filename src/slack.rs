@@ -7,7 +7,6 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 use crate::app::{ChatInfo, ChatSection};
-use crate::config::Config;
 
 /// Updates received from Slack
 #[derive(Debug, Clone)]
@@ -85,6 +84,14 @@ struct ConversationMembersResponse {
 struct ConversationHistoryResponse {
     ok: bool,
     messages: Vec<SlackMessage>,
+    #[serde(default)]
+    response_metadata: Option<ResponseMetadata>,
+}
+
+#[derive(Deserialize)]
+struct ResponseMetadata {
+    #[serde(default)]
+    next_cursor: String,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -172,9 +179,9 @@ struct SocketModeConnectResponse {
 }
 
 impl SlackClient {
-    pub async fn new(config: &Config) -> Result<Self> {
+    pub async fn new(token: &str, _app_token: &str) -> Result<Self> {
         let http = HttpClient::new();
-        let token = config.token.clone();
+        let token = token.to_string();
 
         let client = Self {
             http,
@@ -533,23 +540,55 @@ impl SlackClient {
         channel_id: &str,
         limit: usize,
     ) -> Result<Vec<SlackMessage>> {
-        let response: ConversationHistoryResponse = self
-            .http
-            .get(&format!(
-                "https://slack.com/api/conversations.history?channel={}&limit={}",
-                channel_id, limit
-            ))
-            .bearer_auth(&self.token)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let mut all_messages: Vec<SlackMessage> = Vec::new();
+        let mut cursor: Option<String> = None;
+        let page_limit = limit.min(200).max(1);
 
-        if !response.ok {
-            return Err(anyhow!("Failed to fetch conversation history"));
+        loop {
+            let mut url = format!(
+                "https://slack.com/api/conversations.history?channel={}&limit={}",
+                channel_id, page_limit
+            );
+            if let Some(ref c) = cursor {
+                url.push_str(&format!("&cursor={}", c));
+            }
+
+            let response: ConversationHistoryResponse = self
+                .http
+                .get(&url)
+                .bearer_auth(&self.token)
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            if !response.ok {
+                return Err(anyhow!("Failed to fetch conversation history"));
+            }
+
+            all_messages.extend(response.messages);
+            if all_messages.len() >= limit {
+                all_messages.truncate(limit);
+                break;
+            }
+
+            let next_cursor = response
+                .response_metadata
+                .and_then(|m| {
+                    if m.next_cursor.trim().is_empty() {
+                        None
+                    } else {
+                        Some(m.next_cursor)
+                    }
+                });
+
+            match next_cursor {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
         }
 
-        Ok(response.messages)
+        Ok(all_messages)
     }
 
     pub async fn get_thread_replies(
@@ -558,23 +597,55 @@ impl SlackClient {
         thread_ts: &str,
         limit: usize,
     ) -> Result<Vec<SlackMessage>> {
-        let response: ConversationHistoryResponse = self
-            .http
-            .get(&format!(
-                "https://slack.com/api/conversations.replies?channel={}&ts={}&limit={}",
-                channel_id, thread_ts, limit
-            ))
-            .bearer_auth(&self.token)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let mut all_messages: Vec<SlackMessage> = Vec::new();
+        let mut cursor: Option<String> = None;
+        let page_limit = limit.min(200).max(1);
 
-        if !response.ok {
-            return Err(anyhow!("Failed to fetch thread replies"));
+        loop {
+            let mut url = format!(
+                "https://slack.com/api/conversations.replies?channel={}&ts={}&limit={}",
+                channel_id, thread_ts, page_limit
+            );
+            if let Some(ref c) = cursor {
+                url.push_str(&format!("&cursor={}", c));
+            }
+
+            let response: ConversationHistoryResponse = self
+                .http
+                .get(&url)
+                .bearer_auth(&self.token)
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            if !response.ok {
+                return Err(anyhow!("Failed to fetch thread replies"));
+            }
+
+            all_messages.extend(response.messages);
+            if all_messages.len() >= limit {
+                all_messages.truncate(limit);
+                break;
+            }
+
+            let next_cursor = response
+                .response_metadata
+                .and_then(|m| {
+                    if m.next_cursor.trim().is_empty() {
+                        None
+                    } else {
+                        Some(m.next_cursor)
+                    }
+                });
+
+            match next_cursor {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
         }
 
-        Ok(response.messages)
+        Ok(all_messages)
     }
 
     pub async fn send_message(

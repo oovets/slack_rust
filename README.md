@@ -8,6 +8,13 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
 
 ## Key Features
 
+### Multi-Workspace Support
+- **Multiple Workspaces**: Configure and switch between multiple Slack workspaces
+- **Quick Switching**: Use `Ctrl+1` through `Ctrl+9` to instantly switch workspaces
+- **Workspace List**: View all configured workspaces with `Ctrl+N` or `/workspace`
+- **Per-Workspace State**: Each workspace maintains its own chat list and state
+- **Seamless Migration**: Automatically converts old single-workspace configs
+
 ### Split View & Multi-Pane Workspace
 - **Flexible Layouts**: Split your workspace vertically (`Ctrl+V`) or horizontally (`Ctrl+B`)
 - **Multiple Chats**: Keep multiple conversations open simultaneously in different panes
@@ -113,12 +120,14 @@ cargo build --release
 ```
 
 On first run, you'll be prompted to enter:
+- Your **Workspace Name** (for easy identification)
 - Your **Bot Token** (starts with `xoxb-`) or **User Token** (starts with `xoxp-`)
 - Your **App Token** (starts with `xapp-`)
-- Your **Workspace Name** (for display purposes)
+
+You can add more workspaces by editing the configuration file or using the setup process again.
 
 Configuration files are stored in `~/.config/slack_client_rs/`:
-- `slack_config.json` – Your tokens and workspace info
+- `slack_config.json` – Your workspaces, tokens and settings
 - `layout.json` – Saved pane layout and open channels
 - `aliases.json` – Your custom command aliases
 
@@ -139,6 +148,8 @@ Configuration files are stored in `~/.config/slack_client_rs/`:
 **Note**: Scrolling only works when focus is on a pane (not on the channel list). Press **Tab** to switch focus from the channel list to your active pane.
 
 ### Managing Your Workspace
+- **Ctrl+N** – Show workspace list
+- **Ctrl+1** through **Ctrl+9** – Switch to workspace 1-9
 - **Ctrl+V** – Split current pane vertically
 - **Ctrl+B** – Split current pane horizontally  
 - **Ctrl+K** – Toggle split direction (horizontal ↔ vertical)
@@ -211,6 +222,17 @@ Create a custom alias that expands to a longer text. Useful for frequently used 
 ```
 Remove an existing alias.
 - **Example**: `/unalias brb`
+
+### Workspace Management
+```
+/workspace [name|number]
+/ws [name|number]
+```
+Switch to a different workspace or show the list of all workspaces.
+- **Example**: `/workspace` – Show all configured workspaces
+- **Example**: `/workspace 2` – Switch to workspace #2
+- **Example**: `/ws MyCompany` – Switch to workspace named "MyCompany"
+- **Tip**: Use `Ctrl+1` through `Ctrl+9` for quick switching
 
 ### Channel Management
 ```
@@ -286,9 +308,44 @@ The application is structured into several modules:
 
 ### Data Storage
 Configuration directory: `~/.config/slack_client_rs/`
-- `slack_config.json` – Encrypted tokens and workspace configuration
+- `slack_config.json` – Workspaces with tokens and settings
 - `layout.json` – Pane tree structure and open channels
 - `aliases.json` – User-defined text aliases
+
+## Configuration File Format
+
+The `slack_config.json` supports multiple workspaces:
+
+```json
+{
+  "workspaces": [
+    {
+      "name": "My Company",
+      "token": "xoxp-...",
+      "app_token": "xapp-..."
+    },
+    {
+      "name": "Side Project",
+      "token": "xoxp-...",
+      "app_token": "xapp-..."
+    }
+  ],
+  "active_workspace": 0,
+  "settings": {
+    "show_reactions": true,
+    "show_notifications": true,
+    "compact_mode": false,
+    "show_emojis": true,
+    "show_line_numbers": false,
+    "show_timestamps": true,
+    "show_chat_list": true,
+    "show_user_colors": true,
+    "show_borders": true
+  }
+}
+```
+
+The client automatically converts old single-workspace configs to the new format.
 
 ## Troubleshooting
 
