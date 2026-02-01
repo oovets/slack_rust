@@ -101,7 +101,17 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
     - `mpim:read` – View group direct messages
     - `reactions:write` – Add emoji reactions
     - `users:read` – Get user information
-7. Install the app to your workspace
+6. Enable **Event Subscriptions** under Features → Event Subscriptions
+    - Toggle **Enable Events** to ON
+    - Under **Subscribe to bot events** (or **Subscribe to events on behalf of users** for User Tokens), add:
+      - `message.channels` – Receive messages in public channels
+      - `message.groups` – Receive messages in private channels
+      - `message.im` – Receive direct messages
+      - `message.mpim` – Receive group direct messages
+      - `user_typing` – (Optional) Show typing indicators
+    - **Note**: When using Socket Mode, you do NOT need to provide a Request URL
+    - **Important**: After adding events, you must **reinstall the app** to your workspace
+7. Install (or reinstall) the app to your workspace
 8. Copy your **Bot Token** or **User Token** and **App Token**
 
 ## Quick Start

@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use std::fs::OpenOptions;
+use std::io::Write;
+use tokio::sync::broadcast;
 
 use crate::app::{ChatInfo, ChatSection};
 
@@ -35,6 +38,7 @@ pub struct SlackClient {
     user_id: Arc<Mutex<Option<String>>>,
     pending_updates: Arc<Mutex<Vec<SlackUpdate>>>,
     ws_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    ws_shutdown: Arc<Mutex<Option<broadcast::Sender<()>>>>,
     user_name_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
@@ -205,6 +209,7 @@ impl SlackClient {
             user_id: Arc::new(Mutex::new(None)),
             pending_updates: Arc::new(Mutex::new(Vec::new())),
             ws_handle: Arc::new(Mutex::new(None)),
+            ws_shutdown: Arc::new(Mutex::new(None)),
             user_name_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
 
@@ -233,6 +238,17 @@ impl SlackClient {
     }
 
     pub async fn start_event_listener(&self, app_token: String) -> Result<()> {
+        // Log that we're starting a new listener
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/slack_rust_debug.log")
+            .and_then(|mut f| {
+                use std::io::Write;
+                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                writeln!(f, "[{}] start_event_listener called", timestamp)
+            });
+        
         // Get WebSocket URL
         let response: SocketModeConnectResponse = self
             .http
@@ -251,43 +267,78 @@ impl SlackClient {
         let http = self.http.clone();
         let token = self.token.clone();
         let user_id = self.user_id.clone();
+        
+        // Create shutdown channel
+        let (shutdown_tx, mut shutdown_rx) = broadcast::channel::<()>(1);
+        *self.ws_shutdown.lock().await = Some(shutdown_tx);
 
         let handle = tokio::spawn(async move {
-            if let Ok((mut ws_stream, _)) = connect_async(&response.url).await {
-                while let Some(Ok(msg)) = ws_stream.next().await {
-                    if let Message::Text(text) = msg {
-                        if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
-                            // Acknowledge envelope
-                            if let Some(envelope_id) =
-                                envelope.get("envelope_id").and_then(|v| v.as_str())
-                            {
-                                let ack = serde_json::json!({
-                                    "envelope_id": envelope_id
-                                });
-                                let _ = ws_stream.send(Message::Text(ack.to_string())).await;
-                            }
+            let log_to_file = |msg: &str| {
+                if let Ok(mut file) = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/slack_rust_debug.log")
+                {
+                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                    let _ = writeln!(file, "[{}] {}", timestamp, msg);
+                }
+            };
 
-                            // Process event
-                            if let Some(event_type) = envelope.get("type").and_then(|v| v.as_str())
-                            {
-                                if event_type == "events_api" {
-                                    if let Some(event) =
-                                        envelope.get("payload").and_then(|p| p.get("event"))
+            log_to_file("WebSocket task starting...");
+            if let Ok((mut ws_stream, _)) = connect_async(&response.url).await {
+                log_to_file("WebSocket connected successfully");
+                loop {
+                    tokio::select! {
+                        Some(Ok(msg)) = ws_stream.next() => {
+                            if let Message::Text(text) = msg {
+                                log_to_file(&format!("Received WebSocket message: {}", &text[..text.len().min(200)]));
+                                if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    // Acknowledge envelope
+                                    if let Some(envelope_id) =
+                                        envelope.get("envelope_id").and_then(|v| v.as_str())
                                     {
-                                        Self::process_event(
-                                            event,
-                                            &pending_updates,
-                                            &http,
-                                            &token,
-                                            &user_id,
-                                        )
-                                        .await;
+                                        let ack = serde_json::json!({
+                                            "envelope_id": envelope_id
+                                        });
+                                        let _ = ws_stream.send(Message::Text(ack.to_string())).await;
+                                        log_to_file(&format!("Acknowledged envelope: {}", envelope_id));
+                                    }
+
+                                    // Process event
+                                    if let Some(event_type) = envelope.get("type").and_then(|v| v.as_str())
+                                    {
+                                        log_to_file(&format!("Event type: {}", event_type));
+                                        if event_type == "events_api" {
+                                            if let Some(event) =
+                                                envelope.get("payload").and_then(|p| p.get("event"))
+                                            {
+                                                log_to_file(&format!("Processing event: {:?}", event));
+                                                Self::process_event(
+                                                    event,
+                                                    &pending_updates,
+                                                    &http,
+                                                    &token,
+                                                    &user_id,
+                                                )
+                                                .await;
+                                                log_to_file("Event processed, added to pending_updates");
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
+                        _ = shutdown_rx.recv() => {
+                            log_to_file("Received shutdown signal, closing WebSocket gracefully");
+                            let _ = ws_stream.close(None).await;
+                            log_to_file("WebSocket closed");
+                            break;
+                        }
                     }
                 }
+                log_to_file("WebSocket stream ended");
+            } else {
+                log_to_file("Failed to connect WebSocket");
             }
         });
 
@@ -762,10 +813,44 @@ impl SlackClient {
         std::mem::take(&mut *updates)
     }
 
-    /// Abort the background WebSocket task, cleaning up the leaked connection.
+    /// Gracefully shutdown the background WebSocket task.
     pub async fn shutdown(&self) {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/slack_rust_debug.log")
+            .and_then(|mut f| {
+                use std::io::Write;
+                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                writeln!(f, "[{}] shutdown() called", timestamp)
+            });
+        
+        // Send shutdown signal to gracefully close WebSocket
+        if let Some(tx) = self.ws_shutdown.lock().await.take() {
+            let _ = tx.send(());
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/slack_rust_debug.log")
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                    writeln!(f, "[{}] Shutdown signal sent", timestamp)
+                });
+        }
+        
+        // Wait for the task to finish (with timeout)
         if let Some(handle) = self.ws_handle.lock().await.take() {
-            handle.abort();
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/slack_rust_debug.log")
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                    writeln!(f, "[{}] WebSocket task finished", timestamp)
+                });
         }
     }
 }

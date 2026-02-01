@@ -40,6 +40,9 @@ async fn main() -> Result<()> {
 
     // Save state before exiting (even if there was an error)
     let _ = app.save_state();
+    
+    // Shutdown WebSocket connection
+    app.slack.shutdown().await;
 
     // Restore terminal
     disable_raw_mode()?;

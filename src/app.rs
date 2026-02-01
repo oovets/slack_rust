@@ -352,6 +352,18 @@ impl App {
 
     pub async fn process_slack_events(&mut self) -> Result<()> {
         let updates = self.slack.get_pending_updates().await;
+        
+        if !updates.is_empty() {
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/slack_rust_debug.log")
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                    writeln!(f, "[{}] Processing {} updates in app.rs", timestamp, updates.len())
+                });
+        }
 
         for update in updates {
             match update {
