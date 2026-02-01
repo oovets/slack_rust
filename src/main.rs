@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_app<B: ratatui::backend::Backend>(
+async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> Result<()> {
@@ -67,24 +67,66 @@ async fn run_app<B: ratatui::backend::Backend>(
         // Poll for workspace switch completion
         if app.poll_workspace_switch() {
             let _ = app.load_all_pane_histories().await;
+            app.needs_redraw = true;
         }
 
         // Handle pending chat refresh (from workspace switch)
         if app.pending_refresh_chats {
             app.pending_refresh_chats = false;
             let _ = app.refresh_chats().await;
+            app.needs_redraw = true;
         }
 
         // Handle pending chat open (from mouse click)
         if app.pending_open_chat {
             app.pending_open_chat = false;
             app.open_selected_chat().await?;
+            app.needs_redraw = true;
         }
 
-        // Draw AFTER processing all state changes
-        terminal.draw(|f| app.draw(f))?;
+        // Check expiry timers
+        let now = std::time::Instant::now();
+        let mut next_wake = std::time::Duration::from_millis(50);
 
-        if event::poll(std::time::Duration::from_millis(50))? {
+        for pane in &mut app.panes {
+            if let Some(expire) = pane.typing_expire {
+                if now >= expire {
+                    pane.check_typing_expired();
+                    app.needs_redraw = true;
+                } else {
+                    let remaining = expire - now;
+                    next_wake = next_wake.min(remaining);
+                }
+            }
+        }
+
+        if let Some(expire) = app.status_expire {
+            if now >= expire {
+                app.status_message = None;
+                app.status_expire = None;
+                app.needs_redraw = true;
+            } else {
+                next_wake = next_wake.min(expire - now);
+            }
+        }
+
+        // Resize detection
+        let size = terminal.size()?;
+        if (size.width, size.height) != app.last_terminal_size {
+            app.last_terminal_size = (size.width, size.height);
+            for pane in &mut app.panes {
+                pane.invalidate_cache();
+            }
+            app.needs_redraw = true;
+        }
+
+        // Draw ONLY if something changed
+        if app.needs_redraw {
+            terminal.draw(|f| app.draw(f))?;
+            app.needs_redraw = false;
+        }
+
+        if event::poll(next_wake)? {
             let event = event::read()?;
             match event {
                 Event::Key(key) => {
@@ -305,6 +347,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                 }
                 _ => {}
             }
+            app.needs_redraw = true;
         }
     }
 

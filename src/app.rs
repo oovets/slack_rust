@@ -51,6 +51,8 @@ pub struct App {
     pub show_user_colors: bool,
     pub show_borders: bool,
     pub user_name_cache: std::collections::HashMap<String, String>,
+    pub needs_redraw: bool,
+    pub last_terminal_size: (u16, u16),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -257,6 +259,8 @@ impl App {
             show_user_colors: app_state.settings.show_user_colors,
             show_borders: app_state.settings.show_borders,
             user_name_cache: std::collections::HashMap::new(),
+            needs_redraw: true,
+            last_terminal_size: (0, 0),
         };
 
         Ok(app)
@@ -291,7 +295,7 @@ impl App {
                     // Add messages to pane
                     let pane = &mut self.panes[pane_idx];
                     pane.msg_data.clear();
-                    pane.format_cache.clear();
+                    pane.invalidate_cache();
                     for slack_msg in messages.iter().rev() {
                         let user_id = slack_msg.user.clone().unwrap_or_default();
                         let sender_name = name_cache
@@ -367,7 +371,7 @@ impl App {
                                                     forwarded_text: forwarded.clone(),
                                                 };
                                                 pane.msg_data.push(msg_data);
-                                                pane.format_cache.clear();
+                                                pane.invalidate_cache();
                                                 pane.scroll_offset = usize::MAX;
                                                 seen_in_open_pane = true;
                                             }
@@ -394,7 +398,7 @@ impl App {
                                                 forwarded_text: forwarded.clone(),
                                             };
                                             pane.msg_data.push(msg_data);
-                                            pane.format_cache.clear();
+                                            pane.invalidate_cache();
                                             pane.scroll_offset = usize::MAX;
                                             seen_in_open_pane = true;
                                         }
@@ -412,6 +416,8 @@ impl App {
                             chat.unread = chat.unread.saturating_add(1);
                         }
                     }
+
+                    self.needs_redraw = true;
 
                     // Send notification
                     if self.show_notifications && !is_bot && !is_self {
@@ -448,6 +454,7 @@ impl App {
                             }
                         }
                     }
+                    self.needs_redraw = true;
                 }
             }
         }
@@ -482,7 +489,7 @@ impl App {
         pane.username = chat.username.clone();
         pane.thread_ts = None;
         pane.msg_data.clear();
-        pane.format_cache.clear();
+        pane.invalidate_cache();
 
         // Clear unread counter when opening the chat
         if let Some(chat_info) = self.chats.get_mut(self.selected_chat_idx) {
@@ -663,19 +670,6 @@ impl App {
     }
 
     pub fn draw(&mut self, f: &mut Frame) {
-        // Check typing indicators for expiry
-        for pane in &mut self.panes {
-            pane.check_typing_expired();
-        }
-
-        // Check status message expiry
-        if let Some(expire) = self.status_expire {
-            if std::time::Instant::now() >= expire {
-                self.status_message = None;
-                self.status_expire = None;
-            }
-        }
-
         let has_status = self.status_message.is_some();
         let main_constraints = if has_status {
             vec![Constraint::Min(0), Constraint::Length(1)]
@@ -1139,6 +1133,7 @@ impl App {
     pub fn set_status(&mut self, message: &str) {
         self.status_message = Some(message.to_string());
         self.status_expire = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        self.needs_redraw = true;
     }
 
     pub fn save_state(&self) -> Result<()> {
@@ -1535,52 +1530,60 @@ impl App {
     // Toggle settings
     pub fn toggle_chat_list(&mut self) {
         self.show_chat_list = !self.show_chat_list;
+        self.needs_redraw = true;
     }
 
     pub fn toggle_reactions(&mut self) {
         self.show_reactions = !self.show_reactions;
         for pane in &mut self.panes {
-            pane.format_cache.clear();
+            pane.invalidate_cache();
         }
+        self.needs_redraw = true;
     }
 
     pub fn toggle_emojis(&mut self) {
         self.show_emojis = !self.show_emojis;
         for pane in &mut self.panes {
-            pane.format_cache.clear();
+            pane.invalidate_cache();
         }
+        self.needs_redraw = true;
     }
 
     pub fn toggle_timestamps(&mut self) {
         self.show_timestamps = !self.show_timestamps;
         for pane in &mut self.panes {
-            pane.format_cache.clear();
+            pane.invalidate_cache();
         }
+        self.needs_redraw = true;
     }
 
     pub fn toggle_compact_mode(&mut self) {
         self.compact_mode = !self.compact_mode;
         for pane in &mut self.panes {
-            pane.format_cache.clear();
+            pane.invalidate_cache();
         }
+        self.needs_redraw = true;
     }
 
     pub fn toggle_line_numbers(&mut self) {
         self.show_line_numbers = !self.show_line_numbers;
         for pane in &mut self.panes {
-            pane.format_cache.clear();
+            pane.invalidate_cache();
         }
+        self.needs_redraw = true;
     }
 
     pub fn toggle_user_colors(&mut self) {
         self.show_user_colors = !self.show_user_colors;
         for pane in &mut self.panes {
-            pane.format_cache.clear();
+            pane.invalidate_cache();
         }
+        self.needs_redraw = true;
     }
 
     pub fn toggle_borders(&mut self) {
         self.show_borders = !self.show_borders;
+        self.needs_redraw = true;
     }
 
     pub fn handle_mouse_click(&mut self, x: u16, y: u16) {

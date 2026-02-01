@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ratatui::text::Line;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterType {
@@ -36,7 +36,9 @@ pub struct ChatPane {
     pub typing_expire: Option<std::time::Instant>,
     pub online_status: String,
     pub pinned_message: Option<String>,
-    pub format_cache: HashMap<FormatCacheKey, Vec<String>>,
+    pub dirty: bool,
+    pub cached_lines: Option<Vec<Line<'static>>>,
+    pub cached_line_count: Option<(u16, usize)>, // (width, wrapped_count)
     pub input_buffer: String, // Per-pane input buffer
     pub input_cursor: usize,  // Byte index cursor into input_buffer
     pub tab_complete_state: Option<TabCompleteState>,
@@ -48,19 +50,6 @@ pub struct TabCompleteState {
     pub after: String,           // Text after cursor when tab completion started
     pub candidates: Vec<String>, // Matching names
     pub index: usize,            // Current candidate index
-}
-
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct FormatCacheKey {
-    pub width: u16,
-    pub compact_mode: bool,
-    pub show_emojis: bool,
-    pub show_reactions: bool,
-    pub show_timestamps: bool,
-    pub show_line_numbers: bool,
-    pub msg_count: usize,
-    pub filter_type: Option<String>,
-    pub filter_value: Option<String>,
 }
 
 impl ChatPane {
@@ -84,7 +73,9 @@ impl ChatPane {
             pinned_message: None,
             input_buffer: String::new(),
             input_cursor: 0,
-            format_cache: HashMap::new(),
+            dirty: true,
+            cached_lines: None,
+            cached_line_count: None,
             tab_complete_state: None,
         }
     }
@@ -95,7 +86,13 @@ impl ChatPane {
         self.scroll_offset = 0;
         self.input_buffer.clear();
         self.input_cursor = 0;
-        self.format_cache.clear();
+        self.invalidate_cache();
+    }
+
+    pub fn invalidate_cache(&mut self) {
+        self.dirty = true;
+        self.cached_lines = None;
+        self.cached_line_count = None;
     }
 
     pub fn scroll_up(&mut self) {

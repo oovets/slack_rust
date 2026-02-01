@@ -164,7 +164,7 @@ impl CommandHandler {
             let pane = &mut app.panes[app.focused_pane_idx];
             pane.filter_type = None;
             pane.filter_value = None;
-            pane.format_cache.clear();
+            pane.invalidate_cache();
             app.set_status("Filter cleared");
             return Ok(());
         }
@@ -189,7 +189,7 @@ impl CommandHandler {
         let pane = &mut app.panes[app.focused_pane_idx];
         pane.filter_type = Some(filter_type);
         pane.filter_value = filter_value.clone();
-        pane.format_cache.clear();
+        pane.invalidate_cache();
 
         let msg = if let Some(val) = filter_value {
             format!("Filter: {:?} = {}", &filter_type, val)
