@@ -315,11 +315,27 @@ impl App {
                     pane.msg_data.clear();
                     pane.invalidate_cache();
                     for slack_msg in messages.iter().rev() {
-                        let user_id = slack_msg.user.clone().unwrap_or_default();
-                        let sender_name = name_cache
-                            .get(&user_id)
-                            .cloned()
-                            .unwrap_or_else(|| "Unknown".to_string());
+                        // Try to get sender name from user, bot_profile, username, or bot_id
+                        let sender_name = if let Some(ref user_id) = slack_msg.user {
+                            name_cache
+                                .get(user_id)
+                                .cloned()
+                                .unwrap_or_else(|| user_id.clone())
+                        } else if let Some(ref bot_profile) = slack_msg.bot_profile {
+                            // For Slack apps/webhooks, bot_profile.name contains the display name
+                            bot_profile.name.clone().unwrap_or_else(|| "Bot".to_string())
+                        } else if let Some(ref username) = slack_msg.username {
+                            // Fallback to username field
+                            username.clone()
+                        } else if let Some(ref bot_id) = slack_msg.bot_id {
+                            // Fallback to bot_id lookup
+                            name_cache
+                                .get(bot_id)
+                                .cloned()
+                                .unwrap_or_else(|| bot_id.clone())
+                        } else {
+                            "Unknown".to_string()
+                        };
                         let reactions: Vec<(String, u32)> = slack_msg
                             .reactions
                             .iter()
@@ -606,7 +622,7 @@ impl App {
         // Load messages
         match self.slack.get_conversation_history(&chat.id, 500).await {
             Ok(messages) => {
-                // Collect unique user IDs and resolve names in batch
+                // Collect unique user IDs and bot IDs and resolve names in batch
                 let mut name_cache: std::collections::HashMap<String, String> =
                     std::collections::HashMap::new();
                 for slack_msg in &messages {
@@ -616,14 +632,36 @@ impl App {
                             name_cache.insert(uid.clone(), name);
                         }
                     }
+                    if let Some(ref bot_id) = slack_msg.bot_id {
+                        if !name_cache.contains_key(bot_id) {
+                            let name = self.slack.resolve_bot_name(bot_id).await;
+                            name_cache.insert(bot_id.clone(), name);
+                        }
+                    }
                 }
 
                 for slack_msg in messages.iter().rev() {
-                    let user_id = slack_msg.user.clone().unwrap_or_default();
-                    let sender_name = name_cache
-                        .get(&user_id)
-                        .cloned()
-                        .unwrap_or_else(|| "Unknown".to_string());
+                    // Try to get sender name from user, bot_profile, username, or bot_id
+                    let sender_name = if let Some(ref user_id) = slack_msg.user {
+                        name_cache
+                            .get(user_id)
+                            .cloned()
+                            .unwrap_or_else(|| user_id.clone())
+                    } else if let Some(ref bot_profile) = slack_msg.bot_profile {
+                        // For Slack apps/webhooks, bot_profile.name contains the display name
+                        bot_profile.name.clone().unwrap_or_else(|| "Bot".to_string())
+                    } else if let Some(ref username) = slack_msg.username {
+                        // Fallback to username field
+                        username.clone()
+                    } else if let Some(ref bot_id) = slack_msg.bot_id {
+                        // Fallback to bot_id lookup
+                        name_cache
+                            .get(bot_id)
+                            .cloned()
+                            .unwrap_or_else(|| bot_id.clone())
+                    } else {
+                        "Unknown".to_string()
+                    };
                     let reactions: Vec<(String, u32)> = slack_msg
                         .reactions
                         .iter()
@@ -694,15 +732,37 @@ impl App {
                             name_cache.insert(uid.clone(), name);
                         }
                     }
+                    if let Some(ref bot_id) = slack_msg.bot_id {
+                        if !name_cache.contains_key(bot_id) {
+                            let name = self.slack.resolve_bot_name(bot_id).await;
+                            name_cache.insert(bot_id.clone(), name);
+                        }
+                    }
                 }
 
                 let pane = &mut self.panes[new_idx];
                 for slack_msg in &messages {
-                    let user_id = slack_msg.user.clone().unwrap_or_default();
-                    let sender_name = name_cache
-                        .get(&user_id)
-                        .cloned()
-                        .unwrap_or_else(|| "Unknown".to_string());
+                    // Try to get sender name from user, bot_profile, username, or bot_id
+                    let sender_name = if let Some(ref user_id) = slack_msg.user {
+                        name_cache
+                            .get(user_id)
+                            .cloned()
+                            .unwrap_or_else(|| user_id.clone())
+                    } else if let Some(ref bot_profile) = slack_msg.bot_profile {
+                        // For Slack apps/webhooks, bot_profile.name contains the display name
+                        bot_profile.name.clone().unwrap_or_else(|| "Bot".to_string())
+                    } else if let Some(ref username) = slack_msg.username {
+                        // Fallback to username field
+                        username.clone()
+                    } else if let Some(ref bot_id) = slack_msg.bot_id {
+                        // Fallback to bot_id lookup
+                        name_cache
+                            .get(bot_id)
+                            .cloned()
+                            .unwrap_or_else(|| bot_id.clone())
+                    } else {
+                        "Unknown".to_string()
+                    };
                     let reactions: Vec<(String, u32)> = slack_msg
                         .reactions
                         .iter()
@@ -1169,7 +1229,7 @@ impl App {
             }
             let secs: i64 = ts.split('.').next()?.parse().ok()?;
             let dt = Local.timestamp_opt(secs, 0).single()?;
-            Some(dt.format("%Y-%m-%d %H:%M").to_string())
+            Some(dt.format("%H:%M").to_string())
         };
 
         // Messages with emojis, reactions, and thread indicators

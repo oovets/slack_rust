@@ -125,6 +125,12 @@ pub struct SlackMessage {
     #[serde(default)]
     pub bot_id: Option<String>,
     #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub app_id: Option<String>,
+    #[serde(default)]
+    pub bot_profile: Option<BotProfile>,
+    #[serde(default)]
     pub reactions: Vec<SlackReaction>,
     #[serde(default)]
     pub thread_ts: Option<String>,
@@ -132,6 +138,16 @@ pub struct SlackMessage {
     pub reply_count: Option<u32>,
     #[serde(default)]
     pub attachments: Vec<SlackAttachment>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct BotProfile {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub app_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -568,6 +584,47 @@ impl SlackClient {
             }
         }
         false
+    }
+
+    pub async fn resolve_bot_name(&self, bot_id: &str) -> String {
+        // Check cache first
+        {
+            let cache = self.user_name_cache.lock().await;
+            if let Some(name) = cache.get(bot_id) {
+                return name.clone();
+            }
+        }
+        
+        // Fetch bot info
+        let resp = self
+            .http
+            .get(&format!(
+                "https://slack.com/api/bots.info?bot={}",
+                bot_id
+            ))
+            .bearer_auth(&self.token)
+            .send()
+            .await;
+
+        if let Ok(resp) = resp {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                if json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if let Some(name) = json.get("bot")
+                        .and_then(|b| b.get("name"))
+                        .and_then(|n| n.as_str()) {
+                        let name_str = name.to_string();
+                        // Cache it
+                        self.user_name_cache
+                            .lock()
+                            .await
+                            .insert(bot_id.to_string(), name_str.clone());
+                        return name_str;
+                    }
+                }
+            }
+        }
+        
+        bot_id.to_string()
     }
 
     pub async fn get_conversation_members(&self, channel_id: &str) -> Result<Vec<String>> {
