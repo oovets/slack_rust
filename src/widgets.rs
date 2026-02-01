@@ -21,6 +21,10 @@ pub struct MessageData {
     pub local_echo_id: Option<u64>, // Unique ID for local echo deduplication
     pub is_edited: bool, // True if message was edited
     pub is_deleted: bool, // True if message was deleted
+    pub media_type: Option<String>, // "image" or "video" if message contains media
+    pub file_ids: Vec<String>, // List of file IDs for media download (deprecated, use file_urls)
+    pub file_urls: Vec<String>, // List of file download URLs (url_private or url_private_download)
+    pub file_names: Vec<String>, // List of file names for download
 }
 
 pub struct ChatPane {

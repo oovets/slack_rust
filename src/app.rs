@@ -127,6 +127,94 @@ pub struct ChatInfo {
     pub section: ChatSection,
 }
 
+fn detect_media_type(files: &[crate::slack::SlackFile]) -> Option<(String, Vec<String>, Vec<String>, Vec<String>)> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    
+    let log_to_file = |msg: &str| {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/slack_rust_debug.log")
+        {
+            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            let _ = writeln!(file, "[{}] {}", timestamp, msg);
+        }
+    };
+    
+    log_to_file(&format!("=== DETECT MEDIA TYPE DEBUG ==="));
+    log_to_file(&format!("Number of files: {}", files.len()));
+    
+    if files.is_empty() {
+        log_to_file("No files, returning None");
+        return None;
+    }
+    
+    let mut has_image = false;
+    let mut has_video = false;
+    let mut file_ids = Vec::new();
+    let mut file_urls = Vec::new();
+    let mut file_names = Vec::new();
+    
+    for (idx, file) in files.iter().enumerate() {
+        log_to_file(&format!("File {}: id={:?}, mimetype={:?}, filetype={:?}, url_private={:?}, name={:?}", 
+            idx, file.id, file.mimetype, file.filetype, file.url_private, file.name));
+        
+        if let Some(ref id) = file.id {
+            file_ids.push(id.clone());
+        }
+        
+        // Prefer url_private_download, fallback to url_private
+        // url_private_download is specifically for downloading files
+        let url = file.url_private_download.as_ref()
+            .or_else(|| file.url_private.as_ref())
+            .cloned();
+        if let Some(url) = url {
+            file_urls.push(url);
+        }
+        
+        if let Some(ref name) = file.name {
+            file_names.push(name.clone());
+        } else {
+            file_names.push("file".to_string());
+        }
+        
+        if let Some(ref mimetype) = file.mimetype {
+            log_to_file(&format!("  Checking mimetype: {}", mimetype));
+            if mimetype.starts_with("image/") {
+                has_image = true;
+                log_to_file("  -> Detected as image");
+            } else if mimetype.starts_with("video/") {
+                has_video = true;
+                log_to_file("  -> Detected as video");
+            }
+        } else if let Some(ref filetype) = file.filetype {
+            log_to_file(&format!("  Checking filetype: {}", filetype));
+            if filetype == "jpg" || filetype == "jpeg" || filetype == "png" || 
+               filetype == "gif" || filetype == "webp" || filetype == "svg" {
+                has_image = true;
+                log_to_file("  -> Detected as image");
+            } else if filetype == "mp4" || filetype == "mov" || filetype == "webm" {
+                has_video = true;
+                log_to_file("  -> Detected as video");
+            }
+        }
+    }
+    
+    let result = if has_video {
+        log_to_file(&format!("Final result: video, {} files", file_urls.len()));
+        Some(("video".to_string(), file_ids, file_urls, file_names))
+    } else if has_image {
+        log_to_file(&format!("Final result: image, {} files", file_urls.len()));
+        Some(("image".to_string(), file_ids, file_urls, file_names))
+    } else {
+        log_to_file("Final result: None (no media detected)");
+        None
+    };
+    
+    result
+}
+
 fn forwarded_preview(attachments: &[SlackAttachment]) -> Option<String> {
     for att in attachments {
         // For URL previews and forwarded messages, show only title and author
@@ -367,6 +455,9 @@ impl App {
                             .map(|r| (r.name.clone(), r.count))
                             .collect();
                         let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
+                        let (media_type, file_ids, file_urls, file_names) = detect_media_type(&slack_msg.files)
+                            .map(|(mt, ids, urls, names)| (Some(mt), ids, urls, names))
+                            .unwrap_or((None, Vec::new(), Vec::new(), Vec::new()));
                         let msg_data = crate::widgets::MessageData {
                             sender_name,
                             text: slack_msg.text.clone(),
@@ -379,6 +470,10 @@ impl App {
                             local_echo_id: None,
                             is_edited: false,
                             is_deleted: false,
+                            media_type,
+                            file_ids,
+                            file_urls,
+                            file_names,
                         };
                         pane.msg_data.push(msg_data);
                         }
@@ -412,6 +507,9 @@ impl App {
                                 .map(|r| (r.name.clone(), r.count))
                                 .collect();
                             let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
+                            let (media_type, file_ids, file_urls, file_names) = detect_media_type(&slack_msg.files)
+                                .map(|(mt, ids, urls, names)| (Some(mt), ids, urls, names))
+                                .unwrap_or((None, Vec::new(), Vec::new(), Vec::new()));
                             let msg_data = crate::widgets::MessageData {
                                 sender_name,
                                 text: slack_msg.text.clone(),
@@ -422,10 +520,14 @@ impl App {
                                 forwarded_text: forwarded_preview(&slack_msg.attachments),
                                 mentions_me,
                                 local_echo_id: None,
-                                is_edited: false,
-                                is_deleted: false,
-                            };
-                            pane.msg_data.push(msg_data);
+                            is_edited: false,
+                            is_deleted: false,
+                            media_type,
+                            file_ids,
+                            file_urls,
+                            file_names,
+                        };
+                        pane.msg_data.push(msg_data);
                         }
                     }
                     
@@ -471,7 +573,36 @@ impl App {
                     is_self,
                     forwarded,
                     mentions_me,
+                    files,
                 } => {
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    
+                    let log_to_file = |msg: &str| {
+                        if let Ok(mut file) = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open("/tmp/slack_rust_debug.log")
+                        {
+                            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                            let _ = writeln!(file, "[{}] {}", timestamp, msg);
+                        }
+                    };
+                    
+                    log_to_file(&format!("=== PROCESS NEW MESSAGE UPDATE ==="));
+                    log_to_file(&format!("channel_id: {}, user_name: {}, ts: {}", channel_id, user_name, ts));
+                    log_to_file(&format!("thread_ts: {:?}, files count: {}", thread_ts, files.len()));
+                    for (idx, file) in files.iter().enumerate() {
+                        log_to_file(&format!("  File {}: id={:?}, mimetype={:?}, filetype={:?}", 
+                            idx, file.id, file.mimetype, file.filetype));
+                    }
+                    
+                    let (media_type, file_ids, file_urls, file_names) = detect_media_type(&files)
+                        .map(|(mt, ids, urls, names)| (Some(mt), ids, urls, names))
+                        .unwrap_or((None, Vec::new(), Vec::new(), Vec::new()));
+                    
+                    log_to_file(&format!("Detected media_type: {:?}, file_ids: {:?}, file_urls: {:?}, file_names: {:?}", 
+                        media_type, file_ids, file_urls, file_names));
                     let is_thread_reply = matches!(thread_ts.as_ref(), Some(t) if t != &ts);
                     let root_thread_ts = thread_ts.clone().unwrap_or_else(|| ts.clone());
 
@@ -511,8 +642,12 @@ impl App {
                                                         local_echo_id: None,
                             is_edited: false,
                             is_deleted: false,
-                                                    };
-                                                    pane.msg_data.push(msg_data);
+                            media_type: media_type.clone(),
+                            file_ids: file_ids.clone(),
+                            file_urls: file_urls.clone(),
+                            file_names: file_names.clone(),
+                        };
+                        pane.msg_data.push(msg_data);
                                                     pane.invalidate_cache();
                                                     pane.scroll_offset = usize::MAX;
                                                     seen_in_open_pane = true;
@@ -557,11 +692,15 @@ impl App {
                                                     reply_count: 0,
                                                     forwarded_text: forwarded.clone(),
                                                     mentions_me,
-                                                local_echo_id: None,
+                                                    local_echo_id: None,
                             is_edited: false,
                             is_deleted: false,
-                                                };
-                                                pane.msg_data.push(msg_data);
+                            media_type: media_type.clone(),
+                            file_ids: file_ids.clone(),
+                            file_urls: file_urls.clone(),
+                            file_names: file_names.clone(),
+                        };
+                        pane.msg_data.push(msg_data);
                                                 pane.invalidate_cache();
                                                 pane.scroll_offset = usize::MAX;
                                                 seen_in_open_pane = true;
@@ -707,6 +846,10 @@ impl App {
                                     "Unknown".to_string()
                                 };
                                 
+                                let (media_type, file_ids, file_urls, file_names) = detect_media_type(&slack_msg.files)
+                                    .map(|(mt, ids, urls, names)| (Some(mt), ids, urls, names))
+                                    .unwrap_or((None, Vec::new(), Vec::new(), Vec::new()));
+                                
                                 let msg_data = crate::widgets::MessageData {
                                     sender_name,
                                     text: slack_msg.text.clone(),
@@ -717,10 +860,14 @@ impl App {
                                     forwarded_text: None,
                                     mentions_me: false,
                                     local_echo_id: None,
-                                    is_edited: false,
-                                    is_deleted: false,
-                                };
-                                pane.msg_data.push(msg_data);
+                            is_edited: false,
+                            is_deleted: false,
+                            media_type,
+                            file_ids,
+                            file_urls,
+                            file_names,
+                        };
+                        pane.msg_data.push(msg_data);
                             }
                             pane.invalidate_cache();
                         }
@@ -745,6 +892,9 @@ impl App {
                                 };
                                 
                                 let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
+                                let (media_type, file_ids, file_urls, file_names) = detect_media_type(&slack_msg.files)
+                                    .map(|(mt, ids, urls, names)| (Some(mt), ids, urls, names))
+                                    .unwrap_or((None, Vec::new(), Vec::new(), Vec::new()));
                                 let msg_data = crate::widgets::MessageData {
                                     sender_name,
                                     text: slack_msg.text.clone(),
@@ -755,10 +905,14 @@ impl App {
                                     forwarded_text: None,
                                     mentions_me,
                                     local_echo_id: None,
-                                    is_edited: false,
-                                    is_deleted: false,
-                                };
-                                pane.msg_data.push(msg_data);
+                            is_edited: false,
+                            is_deleted: false,
+                            media_type,
+                            file_ids,
+                            file_urls,
+                            file_names,
+                        };
+                        pane.msg_data.push(msg_data);
                             }
                             pane.invalidate_cache();
                         }
@@ -875,6 +1029,9 @@ impl App {
                         .map(|r| (r.name.clone(), r.count))
                         .collect();
                     let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
+                    let (media_type, file_ids, file_urls, file_names) = detect_media_type(&slack_msg.files)
+                        .map(|(mt, ids, urls, names)| (Some(mt), ids, urls, names))
+                        .unwrap_or((None, Vec::new(), Vec::new(), Vec::new()));
                     let msg_data = crate::widgets::MessageData {
                         sender_name,
                         text: slack_msg.text.clone(),
@@ -887,8 +1044,12 @@ impl App {
                         local_echo_id: None,
                             is_edited: false,
                             is_deleted: false,
-                    };
-                    pane.msg_data.push(msg_data);
+                            media_type,
+                            file_ids,
+                            file_urls,
+                            file_names,
+                        };
+                        pane.msg_data.push(msg_data);
                 }
             }
             Err(e) => {
@@ -1010,6 +1171,9 @@ impl App {
                         .map(|r| (r.name.clone(), r.count))
                         .collect();
                     let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
+                    let (media_type, file_ids, file_urls, file_names) = detect_media_type(&slack_msg.files)
+                        .map(|(mt, ids, urls, names)| (Some(mt), ids, urls, names))
+                        .unwrap_or((None, Vec::new(), Vec::new(), Vec::new()));
                     let msg_data = crate::widgets::MessageData {
                         sender_name,
                         text: slack_msg.text.clone(),
@@ -1022,8 +1186,12 @@ impl App {
                         local_echo_id: None,
                             is_edited: false,
                             is_deleted: false,
-                    };
-                    pane.msg_data.push(msg_data);
+                            media_type,
+                            file_ids,
+                            file_urls,
+                            file_names,
+                        };
+                        pane.msg_data.push(msg_data);
                 }
             }
             Err(e) => {
@@ -1132,6 +1300,10 @@ impl App {
                 local_echo_id: Some(local_echo_id),
                 is_edited: false,
                 is_deleted: false,
+                media_type: None,
+                file_ids: Vec::new(),
+                file_urls: Vec::new(),
+                file_names: Vec::new(),
             };
             
             self.panes[pane_idx].msg_data.push(local_msg);
@@ -1572,6 +1744,23 @@ impl App {
 
             let mut content_spans = Vec::new();
             content_spans.push(Span::raw(formatted_text));
+
+            // Add media indicator
+            if let Some(ref media_type) = msg.media_type {
+                let indicator = match media_type.as_str() {
+                    "image" => "[img]",
+                    "video" => "[video]",
+                    _ => "",
+                };
+                if !indicator.is_empty() {
+                    content_spans.push(Span::styled(
+                        format!(" {}", indicator),
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+            }
 
             // Add edited indicator
             if msg.is_edited && !msg.is_deleted {

@@ -49,6 +49,7 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
 - **Compact Mode**: Reduce spacing for more messages on screen (toggle with `Ctrl+D`)
 - **Color-Coded Usernames**: Each user gets a unique, consistent color for better visual distinction (toggle with `Ctrl+U`)
 - **Borderless Mode**: Remove all borders for a cleaner, minimalist interface (toggle with `Ctrl+Y`)
+- **Media Indicators**: Messages with images or videos are flagged with `[IMG]` or `[VIDEO]` markers
 - **Formatting Cache**: Smart caching for smooth scrolling in long conversations
 
 ### Powerful Commands
@@ -57,6 +58,7 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
 - `/alias <name> <value>` – Create command shortcuts or text expansions
 - `/unalias <name>` – Remove an alias
 - `/thread <msg#>` or `/t <msg#>` – Open a message thread in a new pane
+- `/media #XX` – Download and open media (images/videos) from message #XX
 - `/leave` – Leave the current channel
 - `/help` or `/h` – Show help information
 
@@ -101,6 +103,7 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
     - `mpim:read` – View group direct messages
     - `reactions:write` – Add emoji reactions
     - `users:read` – Get user information
+    - **Note**: The `/media` command uses file URLs from message metadata, so no additional file scopes are required
 6. Enable **Event Subscriptions** under Features → Event Subscriptions
     - Toggle **Enable Events** to ON
     - Under **Subscribe to bot events** (or **Subscribe to events on behalf of users** for User Tokens), add:
