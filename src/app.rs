@@ -919,9 +919,43 @@ impl App {
         thread_pane.chat_name = format!("Thread: {}", parent_user);
         self.panes.push(thread_pane);
 
-        // Split current pane vertically, thread takes 1/3
-        self.pane_tree
-            .split_with_ratio(SplitDirection::Vertical, new_idx, 33);
+        // Check if the focused pane is already a thread
+        let focused_pane = &self.panes[self.focused_pane_idx];
+        let is_already_thread = focused_pane.thread_ts.is_some();
+        
+        // Check if there are any existing thread panes open
+        let existing_thread_pane_idx = self.panes.iter()
+            .enumerate()
+            .find(|(_, p)| p.thread_ts.is_some())
+            .map(|(idx, _)| idx);
+        
+        if is_already_thread {
+            // If we're already in a thread view, split the focused thread pane horizontally
+            // This will create a horizontal split within the thread area
+            if !self.pane_tree.split_pane_with_ratio(self.focused_pane_idx, SplitDirection::Horizontal, new_idx, 50) {
+                // If split failed (e.g., pane is deeply nested), try fallback
+                // Fallback: split root horizontally (less ideal but should work)
+                self.pane_tree.split_with_ratio(SplitDirection::Horizontal, new_idx, 50);
+            }
+        } else if let Some(thread_pane_idx) = existing_thread_pane_idx {
+            // If we're in a regular channel but there's already a thread open,
+            // split that existing thread pane horizontally (new thread goes under it)
+            if !self.pane_tree.split_pane_with_ratio(thread_pane_idx, SplitDirection::Horizontal, new_idx, 50) {
+                // Fallback: try splitting the focused pane vertically
+                if !self.pane_tree.split_pane_with_ratio(self.focused_pane_idx, SplitDirection::Vertical, new_idx, 33) {
+                    self.pane_tree.split_with_ratio(SplitDirection::Vertical, new_idx, 33);
+                }
+            }
+        } else {
+            // If we're in a regular channel and no threads are open, split vertically (thread takes 1/3)
+            if !self.pane_tree.split_pane_with_ratio(self.focused_pane_idx, SplitDirection::Vertical, new_idx, 33) {
+                // Fallback if split failed
+                self.pane_tree.split_with_ratio(SplitDirection::Vertical, new_idx, 33);
+            }
+        }
+        
+        // Focus the new thread pane
+        self.focused_pane_idx = new_idx;
 
         // Load thread replies
         match self

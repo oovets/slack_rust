@@ -72,6 +72,56 @@ impl PaneNode {
             }
         }
     }
+    
+    pub fn split_pane_with_ratio(&mut self, target_pane_idx: usize, direction: SplitDirection, new_pane_idx: usize, new_pane_percent: u16) -> bool {
+        match self {
+            PaneNode::Single(idx) if *idx == target_pane_idx => {
+                let old_node = std::mem::replace(self, PaneNode::Single(0));
+                let old_percent = 100u16.saturating_sub(new_pane_percent);
+                *self = PaneNode::Split {
+                    direction,
+                    children: vec![Box::new(old_node), Box::new(PaneNode::Single(new_pane_idx))],
+                    ratios: vec![old_percent, new_pane_percent],
+                };
+                true
+            }
+            PaneNode::Single(_) => false,
+            PaneNode::Split { direction: d, children, ratios } => {
+                // If a direct child is the target and our direction matches, add sibling here
+                if *d == direction {
+                    if let Some(pos) = children.iter().position(|c| matches!(**c, PaneNode::Single(idx) if idx == target_pane_idx)) {
+                        // Insert new pane after the target
+                        children.insert(pos + 1, Box::new(PaneNode::Single(new_pane_idx)));
+                        // Recalculate ratios: keep existing ratios proportional, add new one
+                        let total_ratio: u16 = ratios.iter().sum();
+                        let old_percent = total_ratio.saturating_sub(new_pane_percent);
+                        // Scale existing ratios to fit the remaining space
+                        if total_ratio > 0 {
+                            for ratio in ratios.iter_mut() {
+                                *ratio = (*ratio * old_percent) / total_ratio;
+                            }
+                        } else {
+                            // If no ratios set, distribute equally
+                            let existing_count = children.len() - 1;
+                            ratios.clear();
+                            for _ in 0..existing_count {
+                                ratios.push(old_percent / existing_count.max(1) as u16);
+                            }
+                        }
+                        ratios.insert(pos + 1, new_pane_percent);
+                        return true;
+                    }
+                }
+                // Otherwise recurse - try to find and split the target pane
+                for child in children.iter_mut() {
+                    if child.split_pane_with_ratio(target_pane_idx, direction, new_pane_idx, new_pane_percent) {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+    }
 
     /// Split with a specific ratio for the new pane (in percent).
     pub fn split_with_ratio(
