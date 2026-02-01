@@ -1019,7 +1019,7 @@ impl App {
     fn draw_chat_pane_impl(&self, f: &mut Frame, area: Rect, pane: &ChatPane, is_focused: bool) {
         let has_reply_preview = pane.reply_preview.is_some();
         let header_height = if !self.show_borders { 2 } else if self.compact_mode { 2 } else { 3 };
-        let input_height: u16 = 5; // top margin + 3 lines + bottom margin
+        let input_height: u16 = 3; // top margin + 1 line + bottom margin
         let constraints = if has_reply_preview {
             vec![
                 Constraint::Length(header_height),
