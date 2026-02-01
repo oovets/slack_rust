@@ -20,6 +20,7 @@ pub enum SlackUpdate {
         is_bot: bool,
         is_self: bool,
         forwarded: Option<String>,
+        mentions_me: bool,
     },
     UserTyping {
         channel_id: String,
@@ -147,6 +148,20 @@ fn extract_forwarded_text(attachments: &[SlackAttachment]) -> Option<String> {
         }
     }
     None
+}
+
+/// Check if the text contains a mention of the specified user ID
+/// Looks for patterns like <@U12345> or <@U12345|name>
+fn text_mentions_user(text: &str, user_id: &str) -> bool {
+    if user_id.is_empty() {
+        return false;
+    }
+    
+    // Look for <@USER_ID> or <@USER_ID|...>
+    let pattern1 = format!("<@{}>", user_id);
+    let pattern2 = format!("<@{}|", user_id);
+    
+    text.contains(&pattern1) || text.contains(&pattern2)
 }
 
 #[derive(Deserialize)]
@@ -312,6 +327,9 @@ impl SlackClient {
 
                         let my_id = user_id.lock().await.clone().unwrap_or_default();
                         let is_self = !my_id.is_empty() && user_id_event == my_id;
+                        
+                        // Check if the message mentions the current user
+                        let mentions_me = !my_id.is_empty() && text_mentions_user(text, &my_id);
 
                         // Fetch user name
                         let user_name = if let Ok(user_info) =
@@ -331,6 +349,7 @@ impl SlackClient {
                             is_bot,
                             is_self,
                             forwarded,
+                            mentions_me,
                         });
                     }
                 }

@@ -165,6 +165,19 @@ fn forwarded_preview(attachments: &[SlackAttachment]) -> Option<String> {
 }
 
 impl App {
+    /// Check if a message text contains a mention of the specified user ID
+    fn message_mentions_user(text: &str, user_id: &str) -> bool {
+        if user_id.is_empty() {
+            return false;
+        }
+        
+        // Look for <@USER_ID> or <@USER_ID|...>
+        let pattern1 = format!("<@{}>", user_id);
+        let pattern2 = format!("<@{}|", user_id);
+        
+        text.contains(&pattern1) || text.contains(&pattern2)
+    }
+
     pub async fn new() -> Result<Self> {
         let config = Config::load()?;
         
@@ -308,6 +321,7 @@ impl App {
                             .iter()
                             .map(|r| (r.name.clone(), r.count))
                             .collect();
+                        let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
                         let msg_data = crate::widgets::MessageData {
                             sender_name,
                             text: slack_msg.text.clone(),
@@ -316,6 +330,7 @@ impl App {
                             reactions,
                             reply_count: slack_msg.reply_count.unwrap_or(0),
                             forwarded_text: forwarded_preview(&slack_msg.attachments),
+                            mentions_me,
                         };
                         pane.msg_data.push(msg_data);
                     }
@@ -349,6 +364,7 @@ impl App {
                     is_bot,
                     is_self,
                     forwarded,
+                    mentions_me,
                 } => {
                     let is_thread_reply = matches!(thread_ts.as_ref(), Some(t) if t != &ts);
                     let root_thread_ts = thread_ts.clone().unwrap_or_else(|| ts.clone());
@@ -370,6 +386,7 @@ impl App {
                                                     reactions: Vec::new(),
                                                     reply_count: 0,
                                                     forwarded_text: forwarded.clone(),
+                                                    mentions_me,
                                                 };
                                                 pane.msg_data.push(msg_data);
                                                 pane.invalidate_cache();
@@ -397,6 +414,7 @@ impl App {
                                                 reactions: Vec::new(),
                                                 reply_count: 0,
                                                 forwarded_text: forwarded.clone(),
+                                                mentions_me,
                                             };
                                             pane.msg_data.push(msg_data);
                                             pane.invalidate_cache();
@@ -420,8 +438,8 @@ impl App {
 
                     self.needs_redraw = true;
 
-                    // Send notification
-                    if self.show_notifications && !is_bot && !is_self {
+                    // Send notification only when mentioned
+                    if self.show_notifications && !is_bot && !is_self && mentions_me {
                         let channel_name = self
                             .chats
                             .iter()
@@ -438,7 +456,7 @@ impl App {
                             .unwrap_or_else(|| channel_id.clone());
                         let title = channel_name;
                         let _ = send_desktop_notification(
-                            &format!("Slack: {}", title),
+                            &format!("Slack: {} - You were mentioned!", title),
                             &format!("{}: {}", user_name, text),
                         );
                     }
@@ -523,6 +541,7 @@ impl App {
                         .iter()
                         .map(|r| (r.name.clone(), r.count))
                         .collect();
+                    let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
                     let msg_data = crate::widgets::MessageData {
                         sender_name,
                         text: slack_msg.text.clone(),
@@ -531,6 +550,7 @@ impl App {
                         reactions,
                         reply_count: slack_msg.reply_count.unwrap_or(0),
                         forwarded_text: forwarded_preview(&slack_msg.attachments),
+                        mentions_me,
                     };
                     pane.msg_data.push(msg_data);
                 }
@@ -597,6 +617,7 @@ impl App {
                         .iter()
                         .map(|r| (r.name.clone(), r.count))
                         .collect();
+                    let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
                     let msg_data = crate::widgets::MessageData {
                         sender_name,
                         text: slack_msg.text.clone(),
@@ -605,6 +626,7 @@ impl App {
                         reactions,
                         reply_count: 0,
                         forwarded_text: forwarded_preview(&slack_msg.attachments),
+                        mentions_me,
                     };
                     pane.msg_data.push(msg_data);
                 }
@@ -974,6 +996,16 @@ impl App {
             let formatted_text = format_message_text(&msg.text, show_emojis, &resolve_user);
 
             let mut prefix_spans = Vec::new();
+
+            // Add highlight indicator if message mentions the user
+            if msg.mentions_me {
+                prefix_spans.push(Span::styled(
+                    "@ ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
 
             if show_line_numbers {
                 prefix_spans.push(Span::styled(

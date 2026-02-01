@@ -17,6 +17,7 @@ pub struct MessageData {
     pub reactions: Vec<(String, u32)>, // (emoji_name, count)
     pub reply_count: u32,
     pub forwarded_text: Option<String>,
+    pub mentions_me: bool, // True if this message mentions the current user
 }
 
 pub struct ChatPane {
@@ -39,8 +40,8 @@ pub struct ChatPane {
     pub dirty: bool,
     pub cached_lines: Option<Vec<Line<'static>>>,
     pub cached_line_count: Option<(u16, usize)>, // (width, wrapped_count)
-    pub input_buffer: String, // Per-pane input buffer
-    pub input_cursor: usize,  // Byte index cursor into input_buffer
+    pub input_buffer: String,                    // Per-pane input buffer
+    pub input_cursor: usize,                     // Byte index cursor into input_buffer
     pub tab_complete_state: Option<TabCompleteState>,
 }
 
