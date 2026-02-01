@@ -689,6 +689,48 @@ impl App {
         Ok(())
     }
 
+    /// Convert @username mentions to Slack's <@USER_ID> format
+    fn convert_mentions_to_ids(&self, text: &str) -> String {
+        let mut result = text.to_string();
+        
+        // Build a reverse lookup map: name -> user_id
+        let mut name_to_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for (user_id, user_name) in &self.user_name_cache {
+            name_to_id.insert(user_name.to_lowercase(), user_id.clone());
+        }
+        
+        // Find all @mentions in the text
+        let mut offset = 0;
+        while let Some(at_pos) = result[offset..].find('@') {
+            let abs_pos = offset + at_pos;
+            let after_at = &result[abs_pos + 1..];
+            
+            // Find the end of the mention (space, punctuation, or end of string)
+            let mention_end = after_at
+                .find(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+                .unwrap_or(after_at.len());
+            
+            if mention_end > 0 {
+                let mention_name = &after_at[..mention_end];
+                let mention_lower = mention_name.to_lowercase();
+                
+                // Look up the user ID
+                if let Some(user_id) = name_to_id.get(&mention_lower) {
+                    // Replace @username with <@USER_ID>
+                    let replacement = format!("<@{}>", user_id);
+                    result.replace_range(abs_pos..abs_pos + 1 + mention_end, &replacement);
+                    offset = abs_pos + replacement.len();
+                } else {
+                    offset = abs_pos + 1;
+                }
+            } else {
+                offset = abs_pos + 1;
+            }
+        }
+        
+        result
+    }
+
     pub async fn send_message(&mut self) -> Result<()> {
         self.ensure_valid_pane_idx();
         let pane_idx = self.focused_pane_idx;
@@ -715,7 +757,10 @@ impl App {
         let channel_id_str = self.panes[pane_idx].channel_id_str.clone();
         let thread_ts = self.panes[pane_idx].thread_ts.clone();
         if let Some(channel_id) = channel_id_str {
-            // Local echo: Add message immediately to UI
+            // Convert @username mentions to <@USER_ID> format
+            let message_to_send = self.convert_mentions_to_ids(&input);
+            
+            // Local echo: Add message immediately to UI (with original text)
             let my_name = self.user_name_cache.get(&self.my_user_id)
                 .cloned()
                 .unwrap_or_else(|| "You".to_string());
@@ -746,10 +791,10 @@ impl App {
             self.panes[pane_idx].input_cursor = 0;
             self.panes[pane_idx].tab_complete_state = None;
             
-            // Send to Slack in background (errors shown as status)
+            // Send to Slack with converted mentions
             match self
                 .slack
-                .send_message(&channel_id, &input, thread_ts.as_deref())
+                .send_message(&channel_id, &message_to_send, thread_ts.as_deref())
                 .await
             {
                 Ok(_) => {
