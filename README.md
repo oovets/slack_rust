@@ -104,11 +104,12 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
 6. Enable **Event Subscriptions** under Features → Event Subscriptions
     - Toggle **Enable Events** to ON
     - Under **Subscribe to bot events** (or **Subscribe to events on behalf of users** for User Tokens), add:
-      - `message.channels` – Receive messages in public channels
-      - `message.groups` – Receive messages in private channels
-      - `message.im` – Receive direct messages
-      - `message.mpim` – Receive group direct messages
+      - `message.channels` – Receive messages in public channels (includes edits and deletions)
+      - `message.groups` – Receive messages in private channels (includes edits and deletions)
+      - `message.im` – Receive direct messages (includes edits and deletions)
+      - `message.mpim` – Receive group direct messages (includes edits and deletions)
       - `user_typing` – (Optional) Show typing indicators
+    - **Note**: Message edits and deletions are automatically included as subtypes of the message events above
     - **Note**: When using Socket Mode, you do NOT need to provide a Request URL
     - **Important**: After adding events, you must **reinstall the app** to your workspace
 7. Install (or reinstall) the app to your workspace

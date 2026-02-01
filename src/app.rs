@@ -51,6 +51,7 @@ pub struct App {
     pub show_chat_list: bool,
     pub show_user_colors: bool,
     pub show_borders: bool,
+    pub mouse_support: bool,
     pub user_name_cache: std::collections::HashMap<String, String>,
     pub needs_redraw: bool,
     pub last_terminal_size: (u16, u16),
@@ -273,6 +274,7 @@ impl App {
             show_chat_list: app_state.settings.show_chat_list,
             show_user_colors: app_state.settings.show_user_colors,
             show_borders: app_state.settings.show_borders,
+            mouse_support: app_state.settings.mouse_support,
             user_name_cache: std::collections::HashMap::new(),
             needs_redraw: true,
             last_terminal_size: (0, 0),
@@ -334,6 +336,8 @@ impl App {
                             forwarded_text: forwarded_preview(&slack_msg.attachments),
                             mentions_me,
                             local_echo_id: None,
+                            is_edited: false,
+                            is_deleted: false,
                         };
                         pane.msg_data.push(msg_data);
                     }
@@ -414,6 +418,8 @@ impl App {
                                                     forwarded_text: forwarded.clone(),
                                                     mentions_me,
                                                     local_echo_id: None,
+                            is_edited: false,
+                            is_deleted: false,
                                                 };
                                                 pane.msg_data.push(msg_data);
                                                 pane.invalidate_cache();
@@ -456,6 +462,8 @@ impl App {
                                                 forwarded_text: forwarded.clone(),
                                                 mentions_me,
                                                 local_echo_id: None,
+                            is_edited: false,
+                            is_deleted: false,
                                             };
                                             pane.msg_data.push(msg_data);
                                             pane.invalidate_cache();
@@ -500,6 +508,45 @@ impl App {
                             &format!("Slack: {} - You were mentioned!", title),
                             &format!("{}: {}", user_name, text),
                         );
+                    }
+                }
+                SlackUpdate::MessageChanged {
+                    channel_id,
+                    ts,
+                    new_text,
+                } => {
+                    // Update the message in all panes showing this channel
+                    for pane in &mut self.panes {
+                        if let Some(ref pane_channel_id) = pane.channel_id_str {
+                            if *pane_channel_id == channel_id {
+                                // Find and update the message
+                                if let Some(msg) = pane.msg_data.iter_mut().find(|m| m.ts == ts) {
+                                    msg.text = new_text.clone();
+                                    msg.is_edited = true;
+                                    pane.invalidate_cache();
+                                    self.needs_redraw = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                SlackUpdate::MessageDeleted {
+                    channel_id,
+                    ts,
+                } => {
+                    // Mark the message as deleted in all panes
+                    for pane in &mut self.panes {
+                        if let Some(ref pane_channel_id) = pane.channel_id_str {
+                            if *pane_channel_id == channel_id {
+                                // Find and mark as deleted
+                                if let Some(msg) = pane.msg_data.iter_mut().find(|m| m.ts == ts) {
+                                    msg.is_deleted = true;
+                                    msg.text = "[Message deleted]".to_string();
+                                    pane.invalidate_cache();
+                                    self.needs_redraw = true;
+                                }
+                            }
+                        }
                     }
                 }
                 SlackUpdate::UserTyping {
@@ -593,6 +640,8 @@ impl App {
                         forwarded_text: forwarded_preview(&slack_msg.attachments),
                         mentions_me,
                         local_echo_id: None,
+                            is_edited: false,
+                            is_deleted: false,
                     };
                     pane.msg_data.push(msg_data);
                 }
@@ -670,6 +719,8 @@ impl App {
                         forwarded_text: forwarded_preview(&slack_msg.attachments),
                         mentions_me,
                         local_echo_id: None,
+                            is_edited: false,
+                            is_deleted: false,
                     };
                     pane.msg_data.push(msg_data);
                 }
@@ -778,6 +829,8 @@ impl App {
                 forwarded_text: None,
                 mentions_me: false,
                 local_echo_id: Some(local_echo_id),
+                is_edited: false,
+                is_deleted: false,
             };
             
             self.panes[pane_idx].msg_data.push(local_msg);
@@ -1127,6 +1180,16 @@ impl App {
                 ));
             }
 
+            // Add deleted indicator
+            if msg.is_deleted {
+                prefix_spans.push(Span::styled(
+                    "[DELETED] ",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::ITALIC),
+                ));
+            }
+
             if show_line_numbers {
                 prefix_spans.push(Span::styled(
                     format!("#{} ", idx + 1),
@@ -1158,6 +1221,16 @@ impl App {
 
             let mut content_spans = Vec::new();
             content_spans.push(Span::raw(formatted_text));
+
+            // Add edited indicator
+            if msg.is_edited && !msg.is_deleted {
+                content_spans.push(Span::styled(
+                    " (edited)",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                ));
+            }
 
             // Thread reply indicator
             if msg.reply_count > 0 {
@@ -1330,6 +1403,7 @@ impl App {
                 show_chat_list: self.show_chat_list,
                 show_user_colors: self.show_user_colors,
                 show_borders: self.show_borders,
+                mouse_support: self.mouse_support,
             },
             aliases: self.aliases.clone(),
             layout: LayoutData {
@@ -1768,6 +1842,16 @@ impl App {
         self.needs_redraw = true;
     }
 
+    pub fn toggle_mouse_support(&mut self) {
+        self.mouse_support = !self.mouse_support;
+        let status = if self.mouse_support {
+            "Mouse support enabled (click to focus panes)"
+        } else {
+            "Mouse support disabled (use Shift+drag to select text)"
+        };
+        self.set_status(status);
+    }
+
     pub fn handle_mouse_click(&mut self, x: u16, y: u16) {
         // Check if click is in chat list
         if let Some(area) = self.chat_list_area {
@@ -1842,6 +1926,7 @@ impl App {
                 show_chat_list: self.show_chat_list,
                 show_user_colors: self.show_user_colors,
                 show_borders: self.show_borders,
+                mouse_support: self.mouse_support,
             },
             aliases: self.aliases.clone(),
             layout: LayoutData::default(),

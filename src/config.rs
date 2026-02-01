@@ -52,6 +52,9 @@ pub struct Settings {
 
     #[serde(default = "default_true")]
     pub show_borders: bool,
+
+    #[serde(default = "default_true")]
+    pub mouse_support: bool,
 }
 
 impl Default for Settings {
@@ -66,6 +69,7 @@ impl Default for Settings {
             show_chat_list: true,
             show_user_colors: true,
             show_borders: true,
+            mouse_support: true,
         }
     }
 }

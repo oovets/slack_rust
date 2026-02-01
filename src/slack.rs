@@ -25,6 +25,15 @@ pub enum SlackUpdate {
         forwarded: Option<String>,
         mentions_me: bool,
     },
+    MessageChanged {
+        channel_id: String,
+        ts: String,
+        new_text: String,
+    },
+    MessageDeleted {
+        channel_id: String,
+        ts: String,
+    },
     UserTyping {
         channel_id: String,
         user_name: String,
@@ -356,6 +365,46 @@ impl SlackClient {
         if let Some(event_type) = event.get("type").and_then(|v| v.as_str()) {
             match event_type {
                 "message" => {
+                    // Check for message subtypes (edited, deleted)
+                    let subtype = event.get("subtype").and_then(|v| v.as_str());
+                    
+                    match subtype {
+                        Some("message_changed") => {
+                            // Message was edited
+                            if let (Some(channel_id), Some(message)) = (
+                                event.get("channel").and_then(|v| v.as_str()),
+                                event.get("message"),
+                            ) {
+                                if let (Some(ts), Some(new_text)) = (
+                                    message.get("ts").and_then(|v| v.as_str()),
+                                    message.get("text").and_then(|v| v.as_str()),
+                                ) {
+                                    pending_updates.lock().await.push(SlackUpdate::MessageChanged {
+                                        channel_id: channel_id.to_string(),
+                                        ts: ts.to_string(),
+                                        new_text: new_text.to_string(),
+                                    });
+                                }
+                            }
+                            return;
+                        }
+                        Some("message_deleted") => {
+                            // Message was deleted
+                            if let (Some(channel_id), Some(deleted_ts)) = (
+                                event.get("channel").and_then(|v| v.as_str()),
+                                event.get("deleted_ts").and_then(|v| v.as_str()),
+                            ) {
+                                pending_updates.lock().await.push(SlackUpdate::MessageDeleted {
+                                    channel_id: channel_id.to_string(),
+                                    ts: deleted_ts.to_string(),
+                                });
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
+                    
+                    // Regular new message
                     if let (Some(channel_id), Some(text), Some(ts)) = (
                         event.get("channel").and_then(|v| v.as_str()),
                         event.get("text").and_then(|v| v.as_str()),

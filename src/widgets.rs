@@ -19,6 +19,8 @@ pub struct MessageData {
     pub forwarded_text: Option<String>,
     pub mentions_me: bool, // True if this message mentions the current user
     pub local_echo_id: Option<u64>, // Unique ID for local echo deduplication
+    pub is_edited: bool, // True if message was edited
+    pub is_deleted: bool, // True if message was deleted
 }
 
 pub struct ChatPane {

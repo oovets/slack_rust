@@ -149,6 +149,9 @@ pub struct AppSettings {
 
     #[serde(default = "default_true")]
     pub show_borders: bool,
+
+    #[serde(default = "default_true")]
+    pub mouse_support: bool,
 }
 
 impl Default for AppSettings {
@@ -163,6 +166,7 @@ impl Default for AppSettings {
             show_chat_list: true,
             show_user_colors: true,
             show_borders: true,
+            mouse_support: true,
         }
     }
 }
@@ -204,6 +208,7 @@ impl AppState {
             show_chat_list: config.settings.show_chat_list,
             show_user_colors: config.settings.show_user_colors,
             show_borders: config.settings.show_borders,
+            mouse_support: config.settings.mouse_support,
         });
         
         Ok(Self {

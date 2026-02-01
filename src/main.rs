@@ -195,6 +195,10 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             app.toggle_borders();
                         }
+                        // Ctrl+M: Toggle mouse support
+                        KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.toggle_mouse_support();
+                        }
                         // Ctrl+N: Show workspace list
                         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             app.show_workspace_list();
@@ -314,6 +318,11 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                     }
                 }
                 Event::Mouse(mouse_event) => {
+                    // Only handle mouse events if mouse support is enabled
+                    if !app.mouse_support {
+                        continue;
+                    }
+                    
                     use crossterm::event::MouseEventKind;
                     match mouse_event.kind {
                         MouseEventKind::Down(_) => {
