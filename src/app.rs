@@ -413,8 +413,61 @@ impl App {
                                     Some(pane_thread) => {
                                         if let Some(msg_thread) = &thread_ts {
                                             if pane_thread == msg_thread {
+                                                // Check if message already exists (by timestamp)
+                                                let already_exists = pane.msg_data.iter().any(|m| m.ts == ts);
+                                                
+                                                if !already_exists {
+                                                    // Remove local echo if this is our own message
+                                                    if is_self {
+                                                        if let Some(pos) = pane.msg_data.iter().rposition(|m| {
+                                                            m.text == text 
+                                                            && m.is_outgoing
+                                                            && m.local_echo_id.is_some()
+                                                        }) {
+                                                            pane.msg_data.remove(pos);
+                                                        }
+                                                    }
+                                                    
+                                                    let msg_data = crate::widgets::MessageData {
+                                                        sender_name: user_name.clone(),
+                                                        text: text.clone(),
+                                                        is_outgoing: is_self,
+                                                        ts: ts.clone(),
+                                                        reactions: Vec::new(),
+                                                        reply_count: 0,
+                                                        forwarded_text: forwarded.clone(),
+                                                        mentions_me,
+                                                        local_echo_id: None,
+                            is_edited: false,
+                            is_deleted: false,
+                                                    };
+                                                    pane.msg_data.push(msg_data);
+                                                    pane.invalidate_cache();
+                                                    pane.scroll_offset = usize::MAX;
+                                                    seen_in_open_pane = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        if is_thread_reply {
+                                            if let Some(parent) = pane
+                                                .msg_data
+                                                .iter_mut()
+                                                .find(|m| m.ts == root_thread_ts)
+                                            {
+                                                parent.reply_count =
+                                                    parent.reply_count.saturating_add(1);
+                                            }
+                                        } else {
+                                            // Check if message already exists (by timestamp)
+                                            let already_exists = pane.msg_data.iter().any(|m| m.ts == ts);
+                                            
+                                            if !already_exists {
                                                 // Remove local echo if this is our own message
                                                 if is_self {
+                                                    // Find and remove the most recent local echo with matching text
+                                                    // that has a local_echo_id (to avoid removing old messages)
                                                     if let Some(pos) = pane.msg_data.iter().rposition(|m| {
                                                         m.text == text 
                                                         && m.is_outgoing
@@ -433,7 +486,7 @@ impl App {
                                                     reply_count: 0,
                                                     forwarded_text: forwarded.clone(),
                                                     mentions_me,
-                                                    local_echo_id: None,
+                                                local_echo_id: None,
                             is_edited: false,
                             is_deleted: false,
                                                 };
@@ -442,49 +495,6 @@ impl App {
                                                 pane.scroll_offset = usize::MAX;
                                                 seen_in_open_pane = true;
                                             }
-                                        }
-                                    }
-                                    None => {
-                                        if is_thread_reply {
-                                            if let Some(parent) = pane
-                                                .msg_data
-                                                .iter_mut()
-                                                .find(|m| m.ts == root_thread_ts)
-                                            {
-                                                parent.reply_count =
-                                                    parent.reply_count.saturating_add(1);
-                                            }
-                                        } else {
-                                            // Remove local echo if this is our own message
-                                            if is_self {
-                                                // Find and remove the most recent local echo with matching text
-                                                // that has a local_echo_id (to avoid removing old messages)
-                                                if let Some(pos) = pane.msg_data.iter().rposition(|m| {
-                                                    m.text == text 
-                                                    && m.is_outgoing
-                                                    && m.local_echo_id.is_some()
-                                                }) {
-                                                    pane.msg_data.remove(pos);
-                                                }
-                                            }
-                                            
-                                            let msg_data = crate::widgets::MessageData {
-                                                sender_name: user_name.clone(),
-                                                text: text.clone(),
-                                                is_outgoing: is_self,
-                                                ts: ts.clone(),
-                                                reactions: Vec::new(),
-                                                reply_count: 0,
-                                                forwarded_text: forwarded.clone(),
-                                                mentions_me,
-                                                local_echo_id: None,
-                            is_edited: false,
-                            is_deleted: false,
-                                            };
-                                            pane.msg_data.push(msg_data);
-                                            pane.invalidate_cache();
-                                            pane.scroll_offset = usize::MAX;
-                                            seen_in_open_pane = true;
                                         }
                                     }
                                 }
@@ -619,26 +629,52 @@ impl App {
             chat_info.unread = 0;
         }
 
-        // Load messages
-        match self.slack.get_conversation_history(&chat.id, 500).await {
+        // Load messages (reduced from 500 to 100 for faster loading)
+        match self.slack.get_conversation_history(&chat.id, 100).await {
             Ok(messages) => {
-                // Collect unique user IDs and bot IDs and resolve names in batch
-                let mut name_cache: std::collections::HashMap<String, String> =
-                    std::collections::HashMap::new();
+                // Use the global user name cache instead of fetching names again
+                let name_cache = self.user_name_cache.clone();
+                
+                // Collect unique user IDs and bot IDs that we don't have cached yet
+                let mut users_to_fetch = Vec::new();
+                let mut bots_to_fetch = Vec::new();
+                
                 for slack_msg in &messages {
                     if let Some(ref uid) = slack_msg.user {
                         if !name_cache.contains_key(uid) {
-                            let name = self.slack.resolve_user_name(uid).await;
-                            name_cache.insert(uid.clone(), name);
+                            users_to_fetch.push(uid.clone());
                         }
                     }
                     if let Some(ref bot_id) = slack_msg.bot_id {
                         if !name_cache.contains_key(bot_id) {
-                            let name = self.slack.resolve_bot_name(bot_id).await;
-                            name_cache.insert(bot_id.clone(), name);
+                            bots_to_fetch.push(bot_id.clone());
                         }
                     }
                 }
+                
+                // Fetch names in parallel for better performance
+                let mut fetch_tasks = Vec::new();
+                for uid in users_to_fetch {
+                    let slack = self.slack.clone();
+                    fetch_tasks.push(tokio::spawn(async move {
+                        (uid.clone(), slack.resolve_user_name(&uid).await)
+                    }));
+                }
+                for bot_id in bots_to_fetch {
+                    let slack = self.slack.clone();
+                    fetch_tasks.push(tokio::spawn(async move {
+                        (bot_id.clone(), slack.resolve_bot_name(&bot_id).await)
+                    }));
+                }
+                
+                // Wait for all fetches to complete and update cache
+                for task in fetch_tasks {
+                    if let Ok((id, name)) = task.await {
+                        self.user_name_cache.insert(id, name);
+                    }
+                }
+                
+                let name_cache = &self.user_name_cache;
 
                 for slack_msg in messages.iter().rev() {
                     // Try to get sender name from user, bot_profile, username, or bot_id
