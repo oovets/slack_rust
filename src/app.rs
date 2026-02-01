@@ -390,6 +390,15 @@ impl App {
                                     Some(pane_thread) => {
                                         if let Some(msg_thread) = &thread_ts {
                                             if pane_thread == msg_thread {
+                                                // Remove local echo if this is our own message
+                                                if is_self {
+                                                    if let Some(pos) = pane.msg_data.iter().rposition(|m| {
+                                                        m.ts.ends_with(".local") && m.text == text && m.is_outgoing
+                                                    }) {
+                                                        pane.msg_data.remove(pos);
+                                                    }
+                                                }
+                                                
                                                 let msg_data = crate::widgets::MessageData {
                                                     sender_name: user_name.clone(),
                                                     text: text.clone(),
@@ -418,6 +427,16 @@ impl App {
                                                     parent.reply_count.saturating_add(1);
                                             }
                                         } else {
+                                            // Remove local echo if this is our own message
+                                            if is_self {
+                                                // Find and remove the most recent local echo with matching text
+                                                if let Some(pos) = pane.msg_data.iter().rposition(|m| {
+                                                    m.ts.ends_with(".local") && m.text == text && m.is_outgoing
+                                                }) {
+                                                    pane.msg_data.remove(pos);
+                                                }
+                                            }
+                                            
                                             let msg_data = crate::widgets::MessageData {
                                                 sender_name: user_name.clone(),
                                                 text: text.clone(),
@@ -684,19 +703,47 @@ impl App {
         let channel_id_str = self.panes[pane_idx].channel_id_str.clone();
         let thread_ts = self.panes[pane_idx].thread_ts.clone();
         if let Some(channel_id) = channel_id_str {
+            // Local echo: Add message immediately to UI
+            let my_name = self.user_name_cache.get(&self.my_user_id)
+                .cloned()
+                .unwrap_or_else(|| "You".to_string());
+            
+            let local_msg = crate::widgets::MessageData {
+                sender_name: my_name,
+                text: input.clone(),
+                is_outgoing: true,
+                ts: format!("{}.local", chrono::Local::now().timestamp()),
+                reactions: Vec::new(),
+                reply_count: 0,
+                forwarded_text: None,
+                mentions_me: false,
+            };
+            
+            self.panes[pane_idx].msg_data.push(local_msg);
+            self.panes[pane_idx].invalidate_cache();
+            self.panes[pane_idx].scroll_offset = usize::MAX;
+            self.needs_redraw = true;
+            
+            // Clear input immediately
+            self.input_history.push(input.clone());
+            self.panes[pane_idx].input_buffer.clear();
+            self.panes[pane_idx].input_cursor = 0;
+            self.panes[pane_idx].tab_complete_state = None;
+            
+            // Send to Slack in background (errors shown as status)
             match self
                 .slack
                 .send_message(&channel_id, &input, thread_ts.as_deref())
                 .await
             {
                 Ok(_) => {
-                    self.input_history.push(input.clone());
-                    self.panes[pane_idx].input_buffer.clear();
-                    self.panes[pane_idx].input_cursor = 0;
-                    self.panes[pane_idx].tab_complete_state = None;
+                    // Message sent successfully, the real message will come via WebSocket
+                    // and replace the local echo (or we can keep it since it has .local timestamp)
                 }
                 Err(e) => {
                     self.set_status(&format!("Failed to send: {}", e));
+                    // Optionally: remove the local echo message on error
+                    // self.panes[pane_idx].msg_data.pop();
                 }
             }
         }
