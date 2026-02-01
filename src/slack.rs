@@ -474,9 +474,18 @@ impl SlackClient {
                         log_to_file(&format!("bot_profile field: {:?}", event.get("bot_profile")));
                         log_to_file(&format!("app_id field: {:?}", event.get("app_id")));
 
-                        // Fetch user name - prioritize bot_profile, then username, then bot_id lookup, then user lookup
-                        let user_name = if let Some(bot_profile) = event.get("bot_profile") {
-                            // Slack app/webhook with bot_profile
+                        // Fetch user name - prioritize user field first (real users), then bot_profile, username, bot_id
+                        let user_name = if event.get("user").is_some() && user_id_event != "unknown" {
+                            // Regular user - fetch from API (prioritize this over bot_profile)
+                            if let Ok(user_info) = Self::fetch_user_info(http, token, user_id_event).await {
+                                log_to_file(&format!("Using fetched user info: {}", user_info));
+                                user_info
+                            } else {
+                                log_to_file(&format!("Failed to fetch user info, using user_id: {}", user_id_event));
+                                user_id_event.to_string()
+                            }
+                        } else if let Some(bot_profile) = event.get("bot_profile") {
+                            // Slack app/webhook with bot_profile (only if no user field)
                             let name = bot_profile
                                 .get("name")
                                 .and_then(|n| n.as_str())
@@ -503,15 +512,6 @@ impl SlackClient {
                             let bot_name = client.resolve_bot_name(bot_id).await;
                             log_to_file(&format!("Got bot name: {}", bot_name));
                             bot_name
-                        } else if event.get("user").is_some() {
-                            // Regular user - fetch from API
-                            if let Ok(user_info) = Self::fetch_user_info(http, token, user_id_event).await {
-                                log_to_file(&format!("Using fetched user info: {}", user_info));
-                                user_info
-                            } else {
-                                log_to_file(&format!("Failed to fetch user info, using user_id: {}", user_id_event));
-                                user_id_event.to_string()
-                            }
                         } else {
                             log_to_file(&format!("No user info available, using user_id_event: {}", user_id_event));
                             user_id_event.to_string()
