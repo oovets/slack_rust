@@ -272,10 +272,9 @@ impl App {
                 pane.channel_id_str.as_ref().map(|id| (idx, id.clone()))
             })
             .collect();
-        
+
         for (pane_idx, channel_id) in channels_to_load {
-            // Load messages for this channel
-            match self.slack.get_conversation_history(&channel_id, 100).await {
+            match self.slack.get_conversation_history(&channel_id, 500).await {
                 Ok(messages) => {
                     // Collect unique user IDs and resolve names in batch
                     let mut name_cache: std::collections::HashMap<String, String> =
@@ -291,6 +290,8 @@ impl App {
 
                     // Add messages to pane
                     let pane = &mut self.panes[pane_idx];
+                    pane.msg_data.clear();
+                    pane.format_cache.clear();
                     for slack_msg in messages.iter().rev() {
                         let user_id = slack_msg.user.clone().unwrap_or_default();
                         let sender_name = name_cache
@@ -489,7 +490,7 @@ impl App {
         }
 
         // Load messages
-        match self.slack.get_conversation_history(&chat.id, 100).await {
+        match self.slack.get_conversation_history(&chat.id, 500).await {
             Ok(messages) => {
                 // Collect unique user IDs and resolve names in batch
                 let mut name_cache: std::collections::HashMap<String, String> =
@@ -932,9 +933,13 @@ impl App {
             .style(header_style);
         f.render_widget(header, chunks[0]);
 
-        let border_sub = if self.show_borders { 2 } else { 0 };
-        let msg_area_height = chunks[1].height.saturating_sub(border_sub) as usize;
-        let msg_area_width = chunks[1].width.saturating_sub(if self.show_borders { 2 } else { 4 }) as usize;
+        let messages_block = if self.show_borders {
+            Block::default().borders(Borders::ALL).title("Messages")
+        } else {
+            Block::default().padding(Padding::left(2))
+        };
+        let msg_inner = messages_block.inner(chunks[1]);
+        let msg_area_height = msg_inner.height as usize;
 
         let show_emojis = self.show_emojis;
         let show_reactions = self.show_reactions;
@@ -1059,28 +1064,19 @@ impl App {
             }
         }
 
-        // Calculate scroll based on actual rendered lines
-        let total_wrapped_lines: usize = if msg_area_width > 0 {
-            message_lines.iter().map(|line| {
-                let line_width: usize = line.spans.iter().map(|s| s.content.len()).sum();
-                (line_width / msg_area_width) + 1
-            }).sum()
-        } else {
-            message_lines.len()
-        };
+        let messages = Paragraph::new(message_lines)
+            .block(messages_block)
+            .wrap(Wrap { trim: false });
+
+        // Use ratatui's own line_count with inner width for accurate wrapping
+        // line_count adds vertical space back, so subtract it to get content lines only
+        let vertical_space = if self.show_borders { 2u16 } else { 0u16 };
+        let total_wrapped_lines = messages.line_count(msg_inner.width)
+            .saturating_sub(vertical_space as usize);
         let max_scroll = total_wrapped_lines.saturating_sub(msg_area_height);
         let scroll_offset = pane.scroll_offset.min(max_scroll);
 
-        let messages_block = if self.show_borders {
-            Block::default().borders(Borders::ALL).title("Messages")
-        } else {
-            Block::default().padding(Padding::left(2))
-        };
-
-        let messages = Paragraph::new(message_lines)
-            .block(messages_block)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll_offset as u16, 0));
+        let messages = messages.scroll((scroll_offset as u16, 0));
 
         f.render_widget(messages, chunks[1]);
 

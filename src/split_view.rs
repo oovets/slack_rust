@@ -29,6 +29,14 @@ impl PaneNode {
     }
 
     pub fn split(&mut self, direction: SplitDirection, new_pane_idx: usize) {
+        // If already a split in the same direction, append to it for equal sizing
+        if let PaneNode::Split { direction: d, children, ratios } = self {
+            if *d == direction {
+                children.push(Box::new(PaneNode::Single(new_pane_idx)));
+                ratios.clear(); // Reset to equal sizing
+                return;
+            }
+        }
         let old_node = std::mem::replace(self, PaneNode::Single(0));
         *self = PaneNode::Split {
             direction,
@@ -41,13 +49,20 @@ impl PaneNode {
     pub fn split_pane(&mut self, target_pane_idx: usize, direction: SplitDirection, new_pane_idx: usize) -> bool {
         match self {
             PaneNode::Single(idx) if *idx == target_pane_idx => {
-                // Found the target pane, split it
                 self.split(direction, new_pane_idx);
                 true
             }
             PaneNode::Single(_) => false,
-            PaneNode::Split { children, .. } => {
-                // Try to find and split in children
+            PaneNode::Split { direction: d, children, ratios } => {
+                // If a direct child is the target and our direction matches, add sibling here
+                if *d == direction {
+                    if let Some(_pos) = children.iter().position(|c| matches!(**c, PaneNode::Single(idx) if idx == target_pane_idx)) {
+                        children.push(Box::new(PaneNode::Single(new_pane_idx)));
+                        ratios.clear();
+                        return true;
+                    }
+                }
+                // Otherwise recurse
                 for child in children.iter_mut() {
                     if child.split_pane(target_pane_idx, direction, new_pane_idx) {
                         return true;
@@ -155,9 +170,8 @@ impl PaneNode {
                 let constraints: Vec<Constraint> = if ratios.len() == children.len() {
                     ratios.iter().map(|&r| Constraint::Percentage(r)).collect()
                 } else {
-                    (0..children.len())
-                        .map(|_| Constraint::Percentage(100 / children.len() as u16))
-                        .collect()
+                    let n = children.len() as u32;
+                    (0..n).map(|_| Constraint::Ratio(1, n)).collect()
                 };
 
                 let layout_direction = match direction {

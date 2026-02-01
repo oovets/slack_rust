@@ -58,17 +58,14 @@ async fn run_app<B: ratatui::backend::Backend>(
     app: &mut App,
 ) -> Result<()> {
     loop {
-        terminal.draw(|f| app.draw(f))?;
-
         // Ensure pane indices are valid (workspace switch may have changed pane count)
         app.ensure_valid_pane_idx();
 
-        // Process Slack events FIRST - check for new messages frequently
+        // Process Slack events
         app.process_slack_events().await?;
 
         // Poll for workspace switch completion
         if app.poll_workspace_switch() {
-            // New client is ready — reload pane histories too
             let _ = app.load_all_pane_histories().await;
         }
 
@@ -83,6 +80,9 @@ async fn run_app<B: ratatui::backend::Backend>(
             app.pending_open_chat = false;
             app.open_selected_chat().await?;
         }
+
+        // Draw AFTER processing all state changes
+        terminal.draw(|f| app.draw(f))?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
             let event = event::read()?;
@@ -181,6 +181,13 @@ async fn run_app<B: ratatui::backend::Backend>(
                         // Enter: Open chat (when focus on chat list)
                         KeyCode::Enter if app.focus_on_chat_list => {
                             app.open_selected_chat().await?;
+                        }
+                        // Shift+Up/Down: Always scroll messages
+                        KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            app.scroll_up();
+                        }
+                        KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            app.scroll_down();
                         }
                         // Up/Down: Navigate pane or chat list
                         KeyCode::Up => {

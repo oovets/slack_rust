@@ -102,10 +102,11 @@ pub struct SlackReaction {
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct SlackMessage {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub msg_type: String,
     pub ts: String,
     pub user: Option<String>,
+    #[serde(default)]
     pub text: String,
     #[serde(default)]
     pub bot_id: Option<String>,
