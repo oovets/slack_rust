@@ -9,6 +9,7 @@ use ratatui::{
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::commands::CommandHandler;
 use crate::config::Config;
@@ -933,6 +934,7 @@ impl App {
             Block::default().padding(Padding::left(2))
         };
         let msg_inner = messages_block.inner(chunks[1]);
+        let msg_width = msg_inner.width as usize;
         let msg_area_height = msg_inner.height as usize;
 
         let show_emojis = self.show_emojis;
@@ -971,17 +973,17 @@ impl App {
 
             let formatted_text = format_message_text(&msg.text, show_emojis, &resolve_user);
 
-            let mut spans = Vec::new();
+            let mut prefix_spans = Vec::new();
 
             if show_line_numbers {
-                spans.push(Span::styled(
+                prefix_spans.push(Span::styled(
                     format!("#{} ", idx + 1),
                     Style::default().fg(Color::DarkGray),
                 ));
             }
 
             if let Some(ts_fmt) = format_ts(&msg.ts) {
-                spans.push(Span::styled(
+                prefix_spans.push(Span::styled(
                     format!("[{}] ", ts_fmt),
                     Style::default().fg(Color::DarkGray),
                 ));
@@ -997,12 +999,17 @@ impl App {
             } else {
                 name_style  // Use default style if colors are disabled
             };
-            spans.push(Span::styled(format!("{}: ", msg.sender_name), username_style));
-            spans.push(Span::raw(formatted_text));
+            prefix_spans.push(Span::styled(
+                format!("{}: ", msg.sender_name),
+                username_style,
+            ));
+
+            let mut content_spans = Vec::new();
+            content_spans.push(Span::raw(formatted_text));
 
             // Thread reply indicator
             if msg.reply_count > 0 {
-                spans.push(Span::styled(
+                content_spans.push(Span::styled(
                     format!(" [{} replies]", msg.reply_count),
                     Style::default()
                         .fg(Color::Magenta)
@@ -1025,42 +1032,65 @@ impl App {
                     })
                     .collect::<Vec<_>>()
                     .join(" ");
-                spans.push(Span::styled(
+                content_spans.push(Span::styled(
                     format!("  {}", reaction_str),
                     Style::default().fg(Color::DarkGray),
                 ));
             }
 
-            message_lines.push(Line::from(spans));
+            let prefix_width = spans_width(&prefix_spans);
+            let indent = " ".repeat(prefix_width);
+            let indent_width = UnicodeWidthStr::width(indent.as_str());
+            let first_width = msg_width.saturating_sub(prefix_width);
+            let rest_width = msg_width.saturating_sub(indent_width);
+            let mut wrapped =
+                wrap_spans_hanging(&content_spans, first_width, rest_width, indent.as_str());
+            if wrapped.is_empty() {
+                wrapped.push(Vec::new());
+            }
+            let mut first_line = prefix_spans;
+            first_line.extend(wrapped.remove(0));
+            message_lines.push(Line::from(first_line));
+            for line in wrapped {
+                message_lines.push(Line::from(line));
+            }
 
             // Show quoted/forwarded message as indented block (max 3 lines)
             if let Some(ref fwd) = msg.forwarded_text {
-                // Split forwarded text into lines and show as quote (limit to 3 lines)
-                let mut line_count = 0;
-                for line in fwd.lines() {
-                    if line_count >= 3 {
-                        message_lines.push(Line::from(Span::styled(
-                            "│ ...",
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::ITALIC),
-                        )));
-                        break;
-                    }
-                    message_lines.push(Line::from(Span::styled(
-                        format!("│ {}", line),
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    )));
-                    line_count += 1;
+                let quote_style = Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC);
+                let quote_prefix = vec![Span::styled("│ ", quote_style)];
+                let quote_prefix_width = spans_width(&quote_prefix);
+                let quote_indent = format!("{}{}", "│ ", " ".repeat(quote_prefix_width.saturating_sub(2)));
+                let quote_first_width = msg_width.saturating_sub(quote_prefix_width);
+                let quote_rest_width =
+                    msg_width.saturating_sub(UnicodeWidthStr::width(quote_indent.as_str()));
+                let quote_spans = vec![Span::styled(fwd.as_str(), quote_style)];
+                let mut quote_lines = wrap_spans_hanging(
+                    &quote_spans,
+                    quote_first_width,
+                    quote_rest_width,
+                    quote_indent.as_str(),
+                );
+                if quote_lines.is_empty() {
+                    quote_lines.push(Vec::new());
+                }
+                if quote_lines.len() > 3 {
+                    quote_lines.truncate(3);
+                    quote_lines.push(vec![Span::styled("│ ...", quote_style)]);
+                }
+                let mut first_line = quote_prefix;
+                first_line.extend(quote_lines.remove(0));
+                message_lines.push(Line::from(first_line));
+                for line in quote_lines {
+                    message_lines.push(Line::from(line));
                 }
             }
         }
 
         let messages = Paragraph::new(message_lines)
-            .block(messages_block)
-            .wrap(Wrap { trim: false });
+            .block(messages_block);
 
         // Use ratatui's own line_count with inner width for accurate wrapping
         // line_count adds vertical space back, so subtract it to get content lines only
@@ -1781,6 +1811,145 @@ impl App {
             self.focused_pane_idx = self.panes.len() - 1;
         }
     }
+}
+
+fn spans_width(spans: &[Span]) -> usize {
+    spans
+        .iter()
+        .flat_map(|span| span.content.chars())
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum()
+}
+
+fn wrap_spans_hanging(
+    spans: &[Span],
+    first_width: usize,
+    rest_width: usize,
+    indent: &str,
+) -> Vec<Vec<Span<'static>>> {
+    let mut lines: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut current: Vec<Span<'static>> = Vec::new();
+    let mut remaining = first_width.max(1);
+    let rest_width = rest_width.max(1);
+    let indent_style = spans.first().map(|span| span.style).unwrap_or_default();
+    let mut line_has_content = false;
+
+    let start_new_line = |lines: &mut Vec<Vec<Span<'static>>>,
+                          current: &mut Vec<Span<'static>>,
+                          remaining: &mut usize,
+                          line_has_content: &mut bool| {
+        lines.push(std::mem::take(current));
+        if !indent.is_empty() {
+            current.push(Span::styled(indent.to_string(), indent_style));
+        }
+        *remaining = rest_width;
+        *line_has_content = false;
+    };
+
+    for span in spans {
+        let style = span.style;
+        let mut text = span.content.as_ref();
+        while !text.is_empty() {
+            let (segment, next) = if let Some(pos) = text.find('\n') {
+                (&text[..pos], Some(&text[pos + 1..]))
+            } else {
+                (text, None)
+            };
+
+            if !segment.is_empty() {
+                let mut tokens: Vec<(String, bool)> = Vec::new();
+                let mut buf = String::new();
+                let mut buf_is_space: Option<bool> = None;
+                for ch in segment.chars() {
+                    let is_space = ch.is_whitespace();
+                    if let Some(current_space) = buf_is_space {
+                        if current_space == is_space {
+                            buf.push(ch);
+                        } else {
+                            tokens.push((std::mem::take(&mut buf), current_space));
+                            buf.push(ch);
+                            buf_is_space = Some(is_space);
+                        }
+                    } else {
+                        buf.push(ch);
+                        buf_is_space = Some(is_space);
+                    }
+                }
+                if let Some(current_space) = buf_is_space {
+                    if !buf.is_empty() {
+                        tokens.push((buf, current_space));
+                    }
+                }
+
+                for (token, is_space) in tokens {
+                    let token_width = UnicodeWidthStr::width(token.as_str());
+                    if is_space {
+                        if line_has_content && token_width <= remaining {
+                            current.push(Span::styled(token, style));
+                            remaining = remaining.saturating_sub(token_width);
+                        }
+                        continue;
+                    }
+
+                    if token_width <= remaining {
+                        current.push(Span::styled(token, style));
+                        remaining = remaining.saturating_sub(token_width);
+                        line_has_content = true;
+                        continue;
+                    }
+
+                    if line_has_content {
+                        start_new_line(&mut lines, &mut current, &mut remaining, &mut line_has_content);
+                    }
+
+                    if token_width <= remaining {
+                        current.push(Span::styled(token, style));
+                        remaining = remaining.saturating_sub(token_width);
+                        line_has_content = true;
+                        continue;
+                    }
+
+                    let mut word_buf = String::new();
+                    for ch in token.chars() {
+                        let width = UnicodeWidthChar::width(ch).unwrap_or(0);
+                        if line_has_content && width > remaining {
+                            if !word_buf.is_empty() {
+                                current.push(Span::styled(std::mem::take(&mut word_buf), style));
+                            }
+                            start_new_line(&mut lines, &mut current, &mut remaining, &mut line_has_content);
+                        }
+                        if remaining == 0 && line_has_content {
+                            if !word_buf.is_empty() {
+                                current.push(Span::styled(std::mem::take(&mut word_buf), style));
+                            }
+                            start_new_line(&mut lines, &mut current, &mut remaining, &mut line_has_content);
+                        }
+
+                        word_buf.push(ch);
+                        remaining = remaining.saturating_sub(width);
+                        line_has_content = true;
+                    }
+                    if !word_buf.is_empty() {
+                        current.push(Span::styled(word_buf, style));
+                    }
+                }
+            }
+
+            if next.is_some() {
+                start_new_line(&mut lines, &mut current, &mut remaining, &mut line_has_content);
+            }
+            if let Some(next_text) = next {
+                text = next_text;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+    lines
 }
 
 fn prev_char_boundary(s: &str, idx: usize) -> usize {
