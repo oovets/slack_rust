@@ -82,7 +82,14 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
   - **User OAuth Token** (starts with `xoxp-...`) or **Bot User OAuth Token** (starts with `xoxb-...`)
     - The client accepts either token type
     - User tokens typically have wider access to channels and DMs
-  - **Recommended OAuth Scopes**:
+
+### Setting Up Your Slack App
+1. Go to [api.slack.com/apps](https://api.slack.com/apps)
+2. Create a new app or select an existing one
+3. Enable **Socket Mode** under Settings → Socket Mode
+4. Generate an **App-Level Token** with `connections:write` scope
+5. Add **OAuth Scopes** under OAuth & Permissions
+    - **Recommended OAuth Scopes**:
     - `channels:history` – Read messages in public channels
     - `channels:read` – View public channels
     - `chat:write` – Send messages
@@ -94,15 +101,8 @@ This is a fully-featured terminal-based Slack client that brings the power of Sl
     - `mpim:read` – View group direct messages
     - `reactions:write` – Add emoji reactions
     - `users:read` – Get user information
-
-### Setting Up Your Slack App
-1. Go to [api.slack.com/apps](https://api.slack.com/apps)
-2. Create a new app or select an existing one
-3. Enable **Socket Mode** under Settings → Socket Mode
-4. Generate an **App-Level Token** with `connections:write` scope
-5. Add **OAuth Scopes** under OAuth & Permissions
-6. Install the app to your workspace
-7. Copy your **Bot Token** or **User Token** and **App Token**
+7. Install the app to your workspace
+8. Copy your **Bot Token** or **User Token** and **App Token**
 
 ## Quick Start
 ```bash
