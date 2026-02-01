@@ -380,6 +380,20 @@ impl SlackClient {
         token: &str,
         user_id: &Arc<Mutex<Option<String>>>,
     ) {
+        // Local logging function
+        let log_to_file = |msg: &str| {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/slack_rust_debug.log")
+            {
+                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(file, "[{}] {}", timestamp, msg);
+            }
+        };
+
         if let Some(event_type) = event.get("type").and_then(|v| v.as_str()) {
             match event_type {
                 "message" => {
@@ -449,14 +463,58 @@ impl SlackClient {
                         // Check if the message mentions the current user
                         let mentions_me = !my_id.is_empty() && text_mentions_user(text, &my_id);
 
-                        // Fetch user name
-                        let user_name = if let Ok(user_info) =
-                            Self::fetch_user_info(http, token, user_id_event).await
-                        {
-                            user_info
+                        // DEBUG: Log the entire event to see what fields we have
+                        log_to_file("=== MESSAGE EVENT DEBUG ===");
+                        log_to_file(&format!("Full event: {}", serde_json::to_string_pretty(event).unwrap_or_default()));
+                        log_to_file(&format!("user field: {:?}", event.get("user")));
+                        log_to_file(&format!("username field: {:?}", event.get("username")));
+                        log_to_file(&format!("bot_id field: {:?}", event.get("bot_id")));
+                        log_to_file(&format!("bot_profile field: {:?}", event.get("bot_profile")));
+                        log_to_file(&format!("app_id field: {:?}", event.get("app_id")));
+
+                        // Fetch user name - prioritize bot_profile, then username, then bot_id lookup, then user lookup
+                        let user_name = if let Some(bot_profile) = event.get("bot_profile") {
+                            // Slack app/webhook with bot_profile
+                            let name = bot_profile
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or("Bot")
+                                .to_string();
+                            log_to_file(&format!("Using bot_profile.name: {}", name));
+                            name
+                        } else if let Some(username) = event.get("username").and_then(|u| u.as_str()) {
+                            // Bot with username field
+                            log_to_file(&format!("Using username field: {}", username));
+                            username.to_string()
+                        } else if let Some(bot_id) = event.get("bot_id").and_then(|b| b.as_str()) {
+                            // Bot message - fetch bot info
+                            log_to_file(&format!("Fetching bot info for bot_id: {}", bot_id));
+                            let client = SlackClient {
+                                http: http.clone(),
+                                token: token.to_string(),
+                                user_id: user_id.clone(),
+                                pending_updates: pending_updates.clone(),
+                                ws_handle: Arc::new(Mutex::new(None)),
+                                ws_shutdown: Arc::new(Mutex::new(None)),
+                                user_name_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                            };
+                            let bot_name = client.resolve_bot_name(bot_id).await;
+                            log_to_file(&format!("Got bot name: {}", bot_name));
+                            bot_name
+                        } else if event.get("user").is_some() {
+                            // Regular user - fetch from API
+                            if let Ok(user_info) = Self::fetch_user_info(http, token, user_id_event).await {
+                                log_to_file(&format!("Using fetched user info: {}", user_info));
+                                user_info
+                            } else {
+                                log_to_file(&format!("Failed to fetch user info, using user_id: {}", user_id_event));
+                                user_id_event.to_string()
+                            }
                         } else {
+                            log_to_file(&format!("No user info available, using user_id_event: {}", user_id_event));
                             user_id_event.to_string()
                         };
+                        log_to_file(&format!("Final user_name: {}", user_name));
 
                         pending_updates.lock().await.push(SlackUpdate::NewMessage {
                             channel_id: channel_id.to_string(),
