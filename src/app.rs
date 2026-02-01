@@ -1609,6 +1609,24 @@ impl App {
         } else if self.panes.len() > 1 {
             self.focused_pane_idx = (self.focused_pane_idx + 1) % self.panes.len();
         }
+        self.clear_unread_for_focused_pane();
+    }
+    
+    fn clear_unread_for_focused_pane(&mut self) {
+        // Clear unread counter for the channel shown in the focused pane
+        if let Some(channel_id) = self.panes.get(self.focused_pane_idx)
+            .and_then(|p| p.channel_id_str.as_ref()) {
+            if let Some(chat) = self.chats.iter_mut().find(|c| &c.id == channel_id) {
+                chat.unread = 0;
+            }
+        }
+        
+        // Clear mention counter for current workspace
+        let workspace_name = self.config.workspaces
+            .get(self.config.active_workspace)
+            .map(|w| w.name.clone())
+            .unwrap_or_default();
+        self.unread_mentions.insert(workspace_name, 0);
     }
 
     pub fn scroll_up(&mut self) {
@@ -2034,6 +2052,7 @@ impl App {
             if x >= area.x && x < area.x + area.width && y >= area.y && y < area.y + area.height {
                 self.focused_pane_idx = *idx;
                 self.focus_on_chat_list = false;
+                self.clear_unread_for_focused_pane();
                 return;
             }
         }
