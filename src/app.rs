@@ -39,6 +39,7 @@ pub struct App {
     pub chat_list_scroll_offset: usize,
     pub pending_open_chat: bool,
     pub pending_refresh_chats: bool,
+    pub pending_reload_panes: bool,
     pub pending_workspace_switch: Option<tokio::sync::oneshot::Receiver<Result<(SlackClient, String), String>>>,
 
     // Settings
@@ -234,6 +235,7 @@ impl App {
                 pane.channel_id_str = ps.channel_id.clone();
                 pane.chat_name = ps.chat_name.clone();
                 pane.scroll_offset = ps.scroll_offset;
+                pane.thread_ts = ps.thread_ts.clone();
                 panes.push(pane);
             } else {
                 panes.push(ChatPane::new());
@@ -264,6 +266,7 @@ impl App {
             chat_list_scroll_offset: 0,
             pending_open_chat: false,
             pending_refresh_chats: false,
+            pending_reload_panes: false,
             pending_workspace_switch: None,
             pane_areas: std::collections::HashMap::new(),
             show_reactions: app_state.settings.show_reactions,
@@ -288,19 +291,29 @@ impl App {
     
     /// Load chat history for all panes that have channels assigned
     pub async fn load_all_pane_histories(&mut self) -> Result<()> {
-        // Collect channel IDs to load
-        let channels_to_load: Vec<(usize, String)> = self.panes
+        // Collect panes to load (with channel_id and optionally thread_ts)
+        let panes_to_load: Vec<(usize, String, Option<String>)> = self.panes
             .iter()
             .enumerate()
             .filter_map(|(idx, pane)| {
-                pane.channel_id_str.as_ref().map(|id| (idx, id.clone()))
+                pane.channel_id_str.as_ref().map(|id| {
+                    (idx, id.clone(), pane.thread_ts.clone())
+                })
             })
             .collect();
 
-        for (pane_idx, channel_id) in channels_to_load {
-            match self.slack.get_conversation_history(&channel_id, 500).await {
+        for (pane_idx, channel_id, thread_ts) in panes_to_load {
+            let result = if let Some(ref thread_ts) = thread_ts {
+                // This is a thread pane - load thread replies
+                self.slack.get_thread_replies(&channel_id, thread_ts, 100).await
+            } else {
+                // Regular channel pane - load channel history
+                self.slack.get_conversation_history(&channel_id, 100).await
+            };
+            
+            match result {
                 Ok(messages) => {
-                    // Collect unique user IDs and resolve names in batch
+                    // Collect unique user IDs and bot IDs and resolve names in batch
                     let mut name_cache: std::collections::HashMap<String, String> =
                         std::collections::HashMap::new();
                     for slack_msg in &messages {
@@ -310,13 +323,23 @@ impl App {
                                 name_cache.insert(uid.clone(), name);
                             }
                         }
+                        if let Some(ref bot_id) = slack_msg.bot_id {
+                            if !name_cache.contains_key(bot_id) {
+                                let name = self.slack.resolve_bot_name(bot_id).await;
+                                name_cache.insert(bot_id.clone(), name);
+                            }
+                        }
                     }
 
                     // Add messages to pane
                     let pane = &mut self.panes[pane_idx];
                     pane.msg_data.clear();
                     pane.invalidate_cache();
-                    for slack_msg in messages.iter().rev() {
+                    
+                    // Thread replies come in chronological order, channel history comes newest first
+                    if thread_ts.is_some() {
+                        // Thread: keep chronological order (oldest first)
+                        for slack_msg in &messages {
                         // Try to get sender name from user, bot_profile, username, or bot_id
                         let sender_name = if let Some(ref user_id) = slack_msg.user {
                             name_cache
@@ -358,6 +381,52 @@ impl App {
                             is_deleted: false,
                         };
                         pane.msg_data.push(msg_data);
+                        }
+                    } else {
+                        // Channel: reverse to show newest first
+                        for slack_msg in messages.iter().rev() {
+                            // Try to get sender name from user, bot_profile, username, or bot_id
+                            let sender_name = if let Some(ref user_id) = slack_msg.user {
+                                name_cache
+                                    .get(user_id)
+                                    .cloned()
+                                    .unwrap_or_else(|| user_id.clone())
+                            } else if let Some(ref bot_profile) = slack_msg.bot_profile {
+                                // For Slack apps/webhooks, bot_profile.name contains the display name
+                                bot_profile.name.clone().unwrap_or_else(|| "Bot".to_string())
+                            } else if let Some(ref username) = slack_msg.username {
+                                // Fallback to username field
+                                username.clone()
+                            } else if let Some(ref bot_id) = slack_msg.bot_id {
+                                // Fallback to bot_id lookup
+                                name_cache
+                                    .get(bot_id)
+                                    .cloned()
+                                    .unwrap_or_else(|| bot_id.clone())
+                            } else {
+                                "Unknown".to_string()
+                            };
+                            let reactions: Vec<(String, u32)> = slack_msg
+                                .reactions
+                                .iter()
+                                .map(|r| (r.name.clone(), r.count))
+                                .collect();
+                            let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
+                            let msg_data = crate::widgets::MessageData {
+                                sender_name,
+                                text: slack_msg.text.clone(),
+                                is_outgoing: slack_msg.user.as_deref() == Some(&self.my_user_id),
+                                ts: slack_msg.ts.clone(),
+                                reactions,
+                                reply_count: slack_msg.reply_count.unwrap_or(0),
+                                forwarded_text: forwarded_preview(&slack_msg.attachments),
+                                mentions_me,
+                                local_echo_id: None,
+                                is_edited: false,
+                                is_deleted: false,
+                            };
+                            pane.msg_data.push(msg_data);
+                        }
                     }
                     
                     // Auto-scroll to bottom
@@ -613,6 +682,91 @@ impl App {
             self.selected_chat_idx = self.chats.len().saturating_sub(1);
         }
         self.set_status("Chats refreshed");
+        Ok(())
+    }
+    
+    pub async fn reload_pane_contents(&mut self) -> Result<()> {
+        // Reload messages for all panes that have a channel set
+        for pane in &mut self.panes {
+            if let Some(ref channel_id) = pane.channel_id_str {
+                if let Some(ref thread_ts) = pane.thread_ts {
+                    // This is a thread pane - load thread replies
+                    match self.slack.get_thread_replies(channel_id, thread_ts, 100).await {
+                        Ok(messages) => {
+                            pane.msg_data.clear();
+                            let name_cache = self.user_name_cache.clone();
+                            
+                            for slack_msg in &messages {
+                                let sender_name = if let Some(ref user_id) = slack_msg.user {
+                                    name_cache.get(user_id).cloned().unwrap_or_else(|| user_id.clone())
+                                } else if let Some(ref bot_profile) = slack_msg.bot_profile {
+                                    bot_profile.name.clone().unwrap_or_else(|| "Bot".to_string())
+                                } else if let Some(ref username) = slack_msg.username {
+                                    username.clone()
+                                } else {
+                                    "Unknown".to_string()
+                                };
+                                
+                                let msg_data = crate::widgets::MessageData {
+                                    sender_name,
+                                    text: slack_msg.text.clone(),
+                                    is_outgoing: slack_msg.user.as_deref() == Some(&self.my_user_id),
+                                    ts: slack_msg.ts.clone(),
+                                    reactions: slack_msg.reactions.iter().map(|r| (r.name.clone(), r.count)).collect(),
+                                    reply_count: slack_msg.reply_count.unwrap_or(0),
+                                    forwarded_text: None,
+                                    mentions_me: false,
+                                    local_echo_id: None,
+                                    is_edited: false,
+                                    is_deleted: false,
+                                };
+                                pane.msg_data.push(msg_data);
+                            }
+                            pane.invalidate_cache();
+                        }
+                        Err(_) => {}
+                    }
+                } else {
+                    // Regular channel pane - load channel history
+                    match self.slack.get_conversation_history(channel_id, 100).await {
+                        Ok(messages) => {
+                            pane.msg_data.clear();
+                            let name_cache = self.user_name_cache.clone();
+                            
+                            for slack_msg in messages.iter().rev() {
+                                let sender_name = if let Some(ref user_id) = slack_msg.user {
+                                    name_cache.get(user_id).cloned().unwrap_or_else(|| user_id.clone())
+                                } else if let Some(ref bot_profile) = slack_msg.bot_profile {
+                                    bot_profile.name.clone().unwrap_or_else(|| "Bot".to_string())
+                                } else if let Some(ref username) = slack_msg.username {
+                                    username.clone()
+                                } else {
+                                    "Unknown".to_string()
+                                };
+                                
+                                let mentions_me = Self::message_mentions_user(&slack_msg.text, &self.my_user_id);
+                                let msg_data = crate::widgets::MessageData {
+                                    sender_name,
+                                    text: slack_msg.text.clone(),
+                                    is_outgoing: slack_msg.user.as_deref() == Some(&self.my_user_id),
+                                    ts: slack_msg.ts.clone(),
+                                    reactions: slack_msg.reactions.iter().map(|r| (r.name.clone(), r.count)).collect(),
+                                    reply_count: slack_msg.reply_count.unwrap_or(0),
+                                    forwarded_text: None,
+                                    mentions_me,
+                                    local_echo_id: None,
+                                    is_edited: false,
+                                    is_deleted: false,
+                                };
+                                pane.msg_data.push(msg_data);
+                            }
+                            pane.invalidate_cache();
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1580,6 +1734,7 @@ impl App {
                         scroll_offset: p.scroll_offset,
                         filter_type: None,
                         filter_value: None,
+                        thread_ts: p.thread_ts.clone(),
                     })
                     .collect(),
                 focused_pane: self.focused_pane_idx,
@@ -2135,6 +2290,7 @@ impl App {
                 pane.channel_id_str = ps.channel_id.clone();
                 pane.chat_name = ps.chat_name.clone();
                 pane.scroll_offset = ps.scroll_offset;
+                pane.thread_ts = ps.thread_ts.clone();
                 self.panes.push(pane);
             } else {
                 self.panes.push(ChatPane::new());
@@ -2182,6 +2338,7 @@ impl App {
                 self.my_user_id = my_user_id;
                 self.pending_workspace_switch = None;
                 self.pending_refresh_chats = true;
+                self.pending_reload_panes = true;
                 let name = self.config.workspaces[self.config.active_workspace].name.clone();
                 self.set_status(&format!("Switched to workspace: {}", name));
                 true

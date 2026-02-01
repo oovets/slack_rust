@@ -25,6 +25,8 @@ pub struct PaneState {
     pub filter_type: Option<String>,
     #[serde(default)]
     pub filter_value: Option<String>,
+    #[serde(default)]
+    pub thread_ts: Option<String>,
 }
 
 impl LayoutData {
@@ -37,6 +39,7 @@ impl LayoutData {
                 scroll_offset: 0,
                 filter_type: None,
                 filter_value: None,
+                thread_ts: None,
             }],
             focused_pane: 0,
             pane_tree: None,

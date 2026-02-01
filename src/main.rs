@@ -79,6 +79,13 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
             let _ = app.refresh_chats().await;
             app.needs_redraw = true;
         }
+        
+        // Handle pending pane reload (from workspace switch)
+        if app.pending_reload_panes {
+            app.pending_reload_panes = false;
+            let _ = app.reload_pane_contents().await;
+            app.needs_redraw = true;
+        }
 
         // Handle pending chat open (from mouse click)
         if app.pending_open_chat {
