@@ -56,6 +56,7 @@ pub struct App {
     pub needs_redraw: bool,
     pub last_terminal_size: (u16, u16),
     pub next_local_echo_id: u64,
+    pub unread_mentions: std::collections::HashMap<String, u32>, // workspace_name -> count
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -279,6 +280,7 @@ impl App {
             needs_redraw: true,
             last_terminal_size: (0, 0),
             next_local_echo_id: 1,
+            unread_mentions: std::collections::HashMap::new(),
         };
 
         Ok(app)
@@ -530,6 +532,14 @@ impl App {
                             })
                             .unwrap_or_else(|| channel_id.clone());
                         let title = channel_name;
+                        
+                        // Increment unread mention counter for current workspace
+                        let workspace_name = self.config.workspaces
+                            .get(self.config.active_workspace)
+                            .map(|w| w.name.clone())
+                            .unwrap_or_default();
+                        *self.unread_mentions.entry(workspace_name).or_insert(0) += 1;
+                        
                         let _ = send_desktop_notification(
                             &format!("Slack: {} - You were mentioned!", title),
                             &format!("{}: {}", user_name, text),
@@ -628,6 +638,13 @@ impl App {
         if let Some(chat_info) = self.chats.get_mut(self.selected_chat_idx) {
             chat_info.unread = 0;
         }
+        
+        // Clear mention counter for current workspace when opening any chat
+        let workspace_name = self.config.workspaces
+            .get(self.config.active_workspace)
+            .map(|w| w.name.clone())
+            .unwrap_or_default();
+        self.unread_mentions.insert(workspace_name, 0);
 
         // Load messages (reduced from 500 to 100 for faster loading)
         match self.slack.get_conversation_history(&chat.id, 100).await {
@@ -963,7 +980,24 @@ impl App {
 
     pub fn draw(&mut self, f: &mut Frame) {
         let has_status = self.status_message.is_some();
-        let main_constraints = if has_status {
+        
+        // Check if we have mentions in other workspaces
+        let current_workspace_name = self.config.workspaces
+            .get(self.config.active_workspace)
+            .map(|w| w.name.clone())
+            .unwrap_or_default();
+        let other_workspace_mentions: Vec<(String, u32)> = self.unread_mentions
+            .iter()
+            .filter(|(ws_name, count)| **ws_name != current_workspace_name && **count > 0)
+            .map(|(name, count)| (name.clone(), *count))
+            .collect();
+        let has_other_mentions = !other_workspace_mentions.is_empty();
+        
+        let main_constraints = if has_status && has_other_mentions {
+            vec![Constraint::Min(0), Constraint::Length(1), Constraint::Length(1)]
+        } else if has_status {
+            vec![Constraint::Min(0), Constraint::Length(1)]
+        } else if has_other_mentions {
             vec![Constraint::Min(0), Constraint::Length(1)]
         } else {
             vec![Constraint::Min(0)]
@@ -1026,12 +1060,26 @@ impl App {
         );
         self.pane_areas = pane_areas;
 
+        // Draw notification bar for mentions in other workspaces
+        if has_other_mentions {
+            let mention_text: String = other_workspace_mentions
+                .iter()
+                .map(|(name, count)| format!("{}: {}@", name, count))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            let notification = Paragraph::new(format!(" Mentions in other workspaces: {} (Ctrl+N to switch)", mention_text))
+                .style(Style::default().bg(Color::Yellow).fg(Color::Black).add_modifier(Modifier::BOLD))
+                .block(Block::default());
+            let notification_idx = if has_status { outer.len() - 2 } else { outer.len() - 1 };
+            f.render_widget(notification, outer[notification_idx]);
+        }
+
         // Draw status bar
         if has_status {
             let status = Paragraph::new(self.status_message.as_ref().unwrap().clone())
                 .style(Style::default().bg(Color::DarkGray).fg(Color::White))
                 .block(Block::default());
-            f.render_widget(status, outer[1]);
+            f.render_widget(status, outer[outer.len() - 1]);
         }
     }
 
@@ -2146,7 +2194,13 @@ impl App {
         let mut msg = String::from("Workspaces (Ctrl+1-9 to switch):\n");
         for (idx, name, is_active) in workspaces {
             let marker = if is_active { "* " } else { "  " };
-            msg.push_str(&format!("{}{}. {}\n", marker, idx + 1, name));
+            let mention_count = self.unread_mentions.get(&name).copied().unwrap_or(0);
+            let mention_indicator = if mention_count > 0 {
+                format!(" [{}@]", mention_count)
+            } else {
+                String::new()
+            };
+            msg.push_str(&format!("{}{}. {}{}\n", marker, idx + 1, name, mention_indicator));
         }
         self.set_status(&msg);
     }
