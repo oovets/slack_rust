@@ -1449,17 +1449,13 @@ impl App {
     // Navigation methods
     pub fn select_next_chat(&mut self) {
         if !self.chats.is_empty() {
-            self.selected_chat_idx = (self.selected_chat_idx + 1) % self.chats.len();
+            self.selected_chat_idx = (self.selected_chat_idx + 1).min(self.chats.len() - 1);
         }
     }
 
     pub fn select_previous_chat(&mut self) {
         if !self.chats.is_empty() {
-            self.selected_chat_idx = if self.selected_chat_idx == 0 {
-                self.chats.len() - 1
-            } else {
-                self.selected_chat_idx - 1
-            };
+            self.selected_chat_idx = self.selected_chat_idx.saturating_sub(1);
         }
     }
 

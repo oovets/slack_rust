@@ -199,6 +199,8 @@ struct User {
     profile: Option<UserProfile>,
     #[serde(default)]
     is_bot: bool,
+    #[serde(default)]
+    deleted: bool,
 }
 
 #[derive(Deserialize)]
@@ -547,6 +549,27 @@ impl SlackClient {
         false
     }
 
+    pub async fn is_user_deleted(&self, user_id: &str) -> bool {
+        let resp = self
+            .http
+            .get(&format!(
+                "https://slack.com/api/users.info?user={}",
+                user_id
+            ))
+            .bearer_auth(&self.token)
+            .send()
+            .await;
+
+        if let Ok(resp) = resp {
+            if let Ok(info) = resp.json::<UserInfoResponse>().await {
+                if info.ok {
+                    return info.user.deleted;
+                }
+            }
+        }
+        false
+    }
+
     pub async fn get_conversation_members(&self, channel_id: &str) -> Result<Vec<String>> {
         let response: ConversationMembersResponse = self
             .http
@@ -588,6 +611,15 @@ impl SlackClient {
             if ch.is_archived {
                 continue;
             }
+            // Skip DMs with deleted users
+            if ch.is_im {
+                if let Some(ref uid) = ch.user {
+                    if self.is_user_deleted(uid).await {
+                        continue;
+                    }
+                }
+            }
+
             // Determine section
             let section = if ch.is_mpim {
                 ChatSection::Group
