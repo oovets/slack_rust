@@ -66,6 +66,7 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
 
         // Process Slack events
         app.process_slack_events().await?;
+        app.maybe_run_fallback_refresh().await?;
 
         // Poll for workspace switch completion
         if app.poll_workspace_switch() {

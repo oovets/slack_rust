@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
+use regex::Regex;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -312,29 +313,18 @@ impl SlackClient {
                 let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
                 writeln!(f, "[{}] start_event_listener called", timestamp)
             });
-        
-        // Get WebSocket URL
-        let response: SocketModeConnectResponse = self
-            .http
-            .post("https://slack.com/api/apps.connections.open")
-            .bearer_auth(&app_token)
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        if !response.ok {
-            return Err(anyhow!("Failed to connect to Socket Mode"));
-        }
 
         let pending_updates = self.pending_updates.clone();
         let http = self.http.clone();
         let token = self.token.clone();
         let user_id = self.user_id.clone();
-        
+
         // Create shutdown channel
         let (shutdown_tx, mut shutdown_rx) = broadcast::channel::<()>(1);
         *self.ws_shutdown.lock().await = Some(shutdown_tx);
+
+        // Channel for proactive reconnection (when approximate_connection_time elapses)
+        let (proactive_tx, mut proactive_rx) = mpsc::channel::<()>(1);
 
         let handle = tokio::spawn(async move {
             let log_to_file = |msg: &str| {
@@ -348,62 +338,147 @@ impl SlackClient {
                 }
             };
 
+            let envelope_id_regex = Regex::new(r#""envelope_id"\s*:\s*"([^"]+)""#).expect("valid regex");
+
             log_to_file("WebSocket task starting...");
-            if let Ok((mut ws_stream, _)) = connect_async(&response.url).await {
+
+            // Reconnection loop
+            'reconnect: loop {
+                // Get fresh WebSocket URL (Slack rotates these periodically)
+                let ws_url = match http
+                    .post("https://slack.com/api/apps.connections.open")
+                    .bearer_auth(&app_token)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => match resp.json::<SocketModeConnectResponse>().await {
+                        Ok(r) if r.ok => r.url,
+                        Ok(_) => {
+                            log_to_file("apps.connections.open returned ok=false");
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            continue 'reconnect;
+                        }
+                        Err(e) => {
+                            log_to_file(&format!("apps.connections.open parse error: {}", e));
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            continue 'reconnect;
+                        }
+                    },
+                    Err(e) => {
+                        log_to_file(&format!("apps.connections.open request failed: {}", e));
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        continue 'reconnect;
+                    }
+                };
+
+                let (mut ws_stream, _) = match connect_async(&ws_url).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        log_to_file(&format!("WebSocket connect failed: {}", e));
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        continue 'reconnect;
+                    }
+                };
+
                 log_to_file("WebSocket connected successfully");
+
+                // Process messages until disconnect, stream end, or shutdown
                 loop {
                     tokio::select! {
-                        Some(Ok(msg)) = ws_stream.next() => {
-                            if let Message::Text(text) = msg {
-                                log_to_file(&format!("Received WebSocket message: {}", &text[..text.len().min(200)]));
-                                if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
-                                    // Acknowledge envelope
-                                    if let Some(envelope_id) =
-                                        envelope.get("envelope_id").and_then(|v| v.as_str())
-                                    {
-                                        let ack = serde_json::json!({
-                                            "envelope_id": envelope_id
+                        biased;
+
+                        _ = shutdown_rx.recv() => {
+                            log_to_file("Received shutdown signal, closing WebSocket gracefully");
+                            let _ = ws_stream.close(None).await;
+                            break 'reconnect;
+                        }
+
+                        Some(()) = proactive_rx.recv() => {
+                            log_to_file("Proactive reconnect triggered (before connection timeout)");
+                            let _ = ws_stream.close(None).await;
+                            break;
+                        }
+
+                        msg = ws_stream.next() => {
+                            match msg {
+                                Some(Ok(Message::Text(text))) => {
+                                    log_to_file(&format!("Received WebSocket message: {}", &text[..text.len().min(200)]));
+
+                                    // Robust ack: extract envelope_id even if full parse fails
+                                    let envelope_id = serde_json::from_str::<serde_json::Value>(&text)
+                                        .ok()
+                                        .and_then(|e| e.get("envelope_id").and_then(|v| v.as_str()).map(String::from))
+                                        .or_else(|| {
+                                            envelope_id_regex
+                                                .captures(&text)
+                                                .and_then(|c| c.get(1))
+                                                .map(|m| m.as_str().to_string())
                                         });
+
+                                    if let Some(ref eid) = envelope_id {
+                                        let ack = serde_json::json!({ "envelope_id": eid });
                                         let _ = ws_stream.send(Message::Text(ack.to_string())).await;
-                                        log_to_file(&format!("Acknowledged envelope: {}", envelope_id));
+                                        log_to_file(&format!("Acknowledged envelope: {}", eid));
                                     }
 
-                                    // Process event
-                                    if let Some(event_type) = envelope.get("type").and_then(|v| v.as_str())
-                                    {
-                                        log_to_file(&format!("Event type: {}", event_type));
-                                        if event_type == "events_api" {
-                                            if let Some(event) =
-                                                envelope.get("payload").and_then(|p| p.get("event"))
-                                            {
-                                                log_to_file(&format!("Processing event: {:?}", event));
-                                                Self::process_event(
-                                                    event,
-                                                    &pending_updates,
-                                                    &http,
-                                                    &token,
-                                                    &user_id,
-                                                )
-                                                .await;
-                                                log_to_file("Event processed, added to pending_updates");
+                                    if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
+                                        if let Some(event_type) = envelope.get("type").and_then(|v| v.as_str()) {
+                                            log_to_file(&format!("Event type: {}", event_type));
+
+                                            if event_type == "hello" {
+                                                if let Some(debug) = envelope.get("debug_info") {
+                                                    if let Some(secs) = debug.get("approximate_connection_time").and_then(|v| v.as_u64()) {
+                                                        let delay_secs = secs.saturating_sub(100).max(60);
+                                                        let proactive_tx_clone = proactive_tx.clone();
+                                                        tokio::spawn(async move {
+                                                            tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+                                                            let _ = proactive_tx_clone.send(()).await;
+                                                        });
+                                                        log_to_file(&format!("Scheduled proactive reconnect in {} seconds", delay_secs));
+                                                    }
+                                                }
+                                            } else if event_type == "disconnect" {
+                                                let reason = envelope.get("reason").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                                log_to_file(&format!("Received disconnect (reason: {}), reconnecting", reason));
+                                                let _ = ws_stream.close(None).await;
+                                                break;
+                                            } else if event_type == "events_api" {
+                                                if let Some(event) = envelope.get("payload").and_then(|p| p.get("event")) {
+                                                    log_to_file(&format!("Processing event: {:?}", event));
+                                                    Self::process_event(
+                                                        event,
+                                                        &pending_updates,
+                                                        &http,
+                                                        &token,
+                                                        &user_id,
+                                                    )
+                                                    .await;
+                                                    log_to_file("Event processed, added to pending_updates");
+                                                }
                                             }
                                         }
                                     }
                                 }
+                                Some(Ok(Message::Close(_))) => {
+                                    log_to_file("WebSocket received Close frame, reconnecting");
+                                    break;
+                                }
+                                Some(Err(e)) => {
+                                    log_to_file(&format!("WebSocket stream error: {}", e));
+                                    break;
+                                }
+                                None => {
+                                    log_to_file("WebSocket stream ended, reconnecting");
+                                    break;
+                                }
+                                _ => {}
                             }
-                        }
-                        _ = shutdown_rx.recv() => {
-                            log_to_file("Received shutdown signal, closing WebSocket gracefully");
-                            let _ = ws_stream.close(None).await;
-                            log_to_file("WebSocket closed");
-                            break;
                         }
                     }
                 }
-                log_to_file("WebSocket stream ended");
-            } else {
-                log_to_file("Failed to connect WebSocket");
             }
+
+            log_to_file("WebSocket task exiting");
         });
 
         *self.ws_handle.lock().await = Some(handle);
@@ -1068,6 +1143,7 @@ impl SlackClient {
         std::mem::take(&mut *updates)
     }
 
+    #[allow(dead_code)]
     pub async fn download_file(&self, file_id: &str, _channel_id: &str) -> Result<std::path::PathBuf> {
         use std::fs::OpenOptions;
         use std::io::Write;
@@ -1388,7 +1464,7 @@ impl SlackClient {
         None
     }
 
-    pub async fn download_file_from_url(&self, mut url: &str, file_name: &str) -> Result<std::path::PathBuf> {
+    pub async fn download_file_from_url(&self, url: &str, file_name: &str) -> Result<std::path::PathBuf> {
         use std::collections::HashSet;
         
         let mut redirect_count = 0;
@@ -1434,7 +1510,7 @@ impl SlackClient {
             
             // Download the file directly from URL
             log_to_file("Starting file download from URL...");
-            let mut request = self
+            let request = self
                 .http
                 .get(&current_url)
                 .bearer_auth(&self.token)
@@ -1615,6 +1691,7 @@ impl SlackClient {
         self.download_file_from_url(download_url, file_name).await
     }
 
+    #[allow(dead_code)]
     pub async fn download_file_by_id(&self, file_id: &str, file_name: &str) -> Result<std::path::PathBuf> {
         use std::fs::OpenOptions;
         use std::io::Write;
