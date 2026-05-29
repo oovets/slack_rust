@@ -1,0 +1,248 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <style>
+    .bg     { fill: #0d1117; }
+    .panel  { fill: #11151c; stroke: #2a313c; stroke-width: 1; }
+    .focus  { stroke: #5fafff; stroke-width: 1; fill: none; }
+    .border { stroke: #2a313c; stroke-width: 1; fill: none; }
+    .dim    { fill: #6c7480; }
+    .fg     { fill: #c9d1d9; }
+    .muted  { fill: #8b95a5; }
+    .blue   { fill: #5fafff; }
+    .green  { fill: #7bd88f; }
+    .yellow { fill: #e5c07b; }
+    .red    { fill: #f07178; }
+    .magenta{ fill: #c678dd; }
+    .cyan   { fill: #56b6c2; }
+    .me     { fill: #98c379; }
+    .header { fill: #8b95a5; font-weight: 600; letter-spacing: 0.5px; }
+    .titleb { font-weight: 600; }
+    .bold   { font-weight: 700; }
+    .ital   { font-style: italic; }
+    .under  { text-decoration: underline; }
+    .codebg { fill: #19191f; }
+    .codefg { fill: #e5c07b; }
+    .pillm  { fill: #ffffff; font-weight: 600; }
+    .pillc  { fill: #ffffff; font-weight: 600; }
+    .pillb  { fill: #ffffff; font-weight: 600; }
+    .pillr  { fill: #ffffff; font-weight: 600; }
+    .pillbg-mention { fill: #436cbf; }
+    .pillbg-bcast   { fill: #be3c3c; }
+    .pillbg-react   { fill: #3c3c41; }
+    .barbg-red    { fill: #be3c3c; }
+    .cardbar      { fill: #36a64f; }
+  </style>
+
+  <rect class="bg" width="1280" height="720"/>
+
+  <!-- mock terminal chrome -->
+  <rect x="0" y="0" width="1280" height="22" fill="#1b2129"/>
+  <circle cx="14" cy="11" r="5" fill="#f07178"/>
+  <circle cx="32" cy="11" r="5" fill="#e5c07b"/>
+  <circle cx="50" cy="11" r="5" fill="#7bd88f"/>
+  <text x="640" y="15" text-anchor="middle" class="dim">slack — rust TUI client</text>
+
+  <!-- chat list panel -->
+  <rect class="panel" x="8" y="30" width="250" height="680"/>
+  <text x="20" y="50" class="header">CHATS</text>
+
+  <!-- Threads section (NEW) -->
+  <text x="20" y="74" class="muted">▾ Threads</text>
+  <rect x="14" y="82" width="238" height="18" class="barbg-red"/>
+  <text x="32" y="95" class="pillm">↳ #incidents · 14:32 (2)</text>
+  <text x="32" y="115" class="fg">↳ #engineering · 14:18</text>
+  <text x="32" y="133" class="fg">↳ alice · 13:55</text>
+
+  <!-- New (unread) -->
+  <text x="20" y="160" class="muted">▾ New</text>
+  <rect x="14" y="168" width="238" height="18" class="barbg-red"/>
+  <text x="32" y="181" class="pillm">  #incidents (5)</text>
+  <text x="32" y="201" class="fg">  alice (1)</text>
+
+  <!-- Public channels — active row in blue -->
+  <text x="20" y="228" class="muted">▾ Public Channels</text>
+  <text x="32" y="246" class="fg"># announcements</text>
+  <rect x="14" y="254" width="238" height="18" fill="#1f4ea0"/>
+  <text x="32" y="267" class="pillm">  # engineering</text>
+  <text x="32" y="287" class="fg"># random</text>
+  <text x="32" y="305" class="fg"># platform-team</text>
+
+  <!-- Private -->
+  <text x="20" y="333" class="muted">▾ Private Channels</text>
+  <text x="32" y="351" class="fg">🔒 secret-launch</text>
+
+  <!-- DMs -->
+  <text x="20" y="379" class="muted">▾ DMs</text>
+  <text x="32" y="397" class="fg">👤 bob</text>
+  <text x="32" y="415" class="fg">👤 carol</text>
+  <text x="32" y="433" class="fg">👤 dave</text>
+
+  <!-- Group -->
+  <text x="20" y="461" class="muted">▾ Group Chats</text>
+  <text x="32" y="479" class="fg">👥 design-sync</text>
+
+  <!-- Bots -->
+  <text x="20" y="507" class="muted">▾ Bots &amp; Apps</text>
+  <text x="32" y="525" class="fg">🤖 github</text>
+  <text x="32" y="543" class="fg">🤖 pagerduty</text>
+
+  <!-- ===== TOP LEFT pane: # engineering (focused) ===== -->
+  <rect class="panel" x="266" y="30" width="502" height="336"/>
+  <rect class="focus" x="266.5" y="30.5" width="501" height="335"/>
+  <text x="280" y="50" class="blue titleb"># engineering</text>
+  <text x="754" y="50" text-anchor="end" class="dim">live</text>
+
+  <!-- aligned column messages, no colon -->
+  <text x="280" y="76" class="dim">[14:12]</text>
+  <text x="332" y="76" class="cyan titleb">alice</text>
+  <text x="408" y="76" class="fg">morning — anyone seen the staging</text>
+  <text x="408" y="92" class="fg">deploy logs?</text>
+
+  <text x="280" y="112" class="dim">[14:13]</text>
+  <text x="332" y="112" class="magenta titleb">bob</text>
+  <text x="408" y="112" class="fg">looks green from my side, the</text>
+  <text x="408" y="128" class="fg">k8s rollout finished a few min ago</text>
+
+  <text x="280" y="148" class="dim">[14:14]</text>
+  <text x="332" y="148" class="yellow titleb">carol</text>
+  <rect x="408" y="135" width="76" height="18" class="pillbg-mention"/>
+  <text x="412" y="148" class="pillm">@stefan</text>
+  <text x="490" y="148" class="fg">can you check the migration script?</text>
+
+  <!-- whole-row red highlight on the mentioning message -->
+  <rect x="269" y="159" width="496" height="18" fill="#5a1f1f"/>
+  <text x="280" y="172" class="pillm">[14:14]</text>
+  <text x="332" y="172" class="pillm bold">carol</text>
+  <text x="408" y="172" class="pillm">↳ replied to your #482 PR</text>
+
+  <text x="280" y="196" class="dim">[14:15]</text>
+  <text x="332" y="196" class="me titleb">stefan</text>
+  <text x="408" y="196" class="fg">on it — pulling latest now</text>
+
+  <!-- code block with row-fill -->
+  <rect x="408" y="208" width="350" height="56" class="codebg"/>
+  <text x="280" y="220" class="dim">[14:16]</text>
+  <text x="332" y="220" class="me titleb">stefan</text>
+  <text x="416" y="222" class="codefg">git pull origin main &amp;&amp; make migrate</text>
+  <text x="416" y="240" class="codefg">→ 12 migrations applied (0 errors)</text>
+  <text x="416" y="258" class="codefg">→ schema sync OK</text>
+
+  <!-- reaction pills -->
+  <rect x="408" y="276" width="44" height="16" class="pillbg-react" rx="2"/>
+  <text x="412" y="288" class="pillm">🎉 3</text>
+  <rect x="456" y="276" width="40" height="16" class="pillbg-react" rx="2"/>
+  <text x="460" y="288" class="pillm">🚀 2</text>
+  <rect x="500" y="276" width="36" height="16" class="pillbg-react" rx="2"/>
+  <text x="504" y="288" class="pillm">✅ 5</text>
+
+  <text x="280" y="312" class="muted ital">↳ 3 replies · last 14:18</text>
+
+  <!-- input row -->
+  <line class="border" x1="275" y1="328" x2="760" y2="328"/>
+  <text x="280" y="350" class="dim">›</text>
+  <text x="294" y="350" class="fg">type a message…</text>
+
+  <!-- ===== TOP RIGHT pane: #incidents ===== -->
+  <rect class="panel" x="772" y="30" width="500" height="336"/>
+  <text x="786" y="50" class="red titleb"># incidents</text>
+  <text x="1258" y="50" text-anchor="end" class="dim">5 unread</text>
+
+  <text x="786" y="76" class="dim">[14:28]</text>
+  <text x="838" y="76" class="red titleb">pagerduty</text>
+  <rect x="930" y="63" width="76" height="18" class="pillbg-bcast"/>
+  <text x="934" y="76" class="pillb">@channel</text>
+  <text x="1010" y="76" class="fg">P2 elevated 5xx</text>
+
+  <!-- attachment card -->
+  <rect x="786" y="86" width="6" height="84" class="cardbar"/>
+  <text x="800" y="98" class="bold fg">@github · pagerduty/runbook</text>
+  <text x="800" y="118" class="muted ital">elevated 5xx on api-gateway</text>
+  <text x="800" y="138" class="fg">▸ check rate of 502s on us-east-1</text>
+  <text x="800" y="156" class="fg">▸ k8s pod restarts in last 5min</text>
+  <text x="800" y="170" class="dim">— pagerduty.com/runbook/p2-5xx</text>
+
+  <text x="786" y="196" class="dim">[14:30]</text>
+  <text x="838" y="196" class="cyan titleb">alice</text>
+  <text x="908" y="196" class="fg">checking dashboards now</text>
+
+  <text x="786" y="220" class="dim">[14:31]</text>
+  <text x="838" y="220" class="magenta titleb">bob</text>
+  <rect x="908" y="207" width="68" height="18" class="pillbg-mention"/>
+  <text x="912" y="220" class="pillm">#api-gw</text>
+  <text x="980" y="220" class="fg"> spiking</text>
+
+  <text x="786" y="248" class="dim">[14:32]</text>
+  <text x="838" y="248" class="yellow titleb">carol</text>
+  <text x="908" y="248" class="fg ital">_rolling back deploy v2.18.0_</text>
+
+  <text x="786" y="280" class="muted ital">↳ 2 replies · last 14:32</text>
+
+  <line class="border" x1="781" y1="328" x2="1264" y2="328"/>
+  <text x="786" y="350" class="dim">›</text>
+  <text x="800" y="350" class="fg">acknowledging…</text>
+
+  <!-- ===== BOTTOM LEFT pane: thread on incidents ===== -->
+  <rect class="panel" x="266" y="372" width="502" height="334"/>
+  <text x="280" y="392" class="blue titleb">↳ thread · # incidents / 14:28</text>
+  <text x="754" y="392" text-anchor="end" class="dim">2 replies</text>
+
+  <text x="280" y="418" class="dim">[14:30]</text>
+  <text x="332" y="418" class="cyan titleb">alice</text>
+  <text x="408" y="418" class="fg">grafana shows 5xx at 4.2%</text>
+
+  <text x="280" y="440" class="dim">[14:31]</text>
+  <text x="332" y="440" class="me titleb">stefan</text>
+  <text x="408" y="440" class="fg">looks correlated with</text>
+  <rect x="540" y="427" width="98" height="18" class="pillbg-mention"/>
+  <text x="544" y="440" class="pillm">#deploys</text>
+  <text x="642" y="440" class="fg"> v2.18.0</text>
+
+  <text x="280" y="468" class="dim">[14:32]</text>
+  <text x="332" y="468" class="yellow titleb">carol</text>
+  <text x="408" y="468" class="fg">rolling back —</text>
+  <text x="510" y="468" class="cyan under">runbook step 4</text>
+
+  <!-- url unfurl card -->
+  <rect x="408" y="478" width="6" height="62" class="cardbar"/>
+  <text x="422" y="490" class="bold fg">runbook · rollback procedure</text>
+  <text x="422" y="510" class="fg">1) freeze deploys</text>
+  <text x="422" y="525" class="fg">2) revert to v2.17.4</text>
+  <text x="422" y="540" class="fg">3) verify dashboards</text>
+
+  <text x="280" y="568" class="muted ital">— end of thread —</text>
+
+  <line class="border" x1="275" y1="666" x2="760" y2="666"/>
+  <text x="280" y="688" class="dim">›</text>
+  <text x="294" y="688" class="fg">reply in thread…</text>
+
+  <!-- ===== BOTTOM RIGHT pane: DM with alice + Giphy ===== -->
+  <rect class="panel" x="772" y="372" width="500" height="334"/>
+  <text x="786" y="392" class="blue titleb">👤 alice</text>
+  <text x="1258" y="392" text-anchor="end" class="dim">DM</text>
+
+  <text x="786" y="418" class="dim">[14:34]</text>
+  <text x="838" y="418" class="cyan titleb">alice</text>
+  <text x="900" y="418" class="fg">rollback complete, 5xx back to</text>
+  <text x="900" y="434" class="green codefg">0.04%</text>
+
+  <text x="786" y="458" class="dim">[14:34]</text>
+  <text x="838" y="458" class="me titleb">stefan</text>
+  <text x="900" y="458" class="fg">phew. nice work today</text>
+
+  <text x="786" y="482" class="dim">[14:35]</text>
+  <text x="838" y="482" class="cyan titleb">alice</text>
+  <text x="900" y="482" class="cyan under">https://giphy.com/relief.gif</text>
+
+  <!-- inline GIF preview placeholder -->
+  <rect x="900" y="492" width="280" height="160" fill="#1a1f2a" stroke="#36a64f" stroke-width="1"/>
+  <text x="1040" y="572" text-anchor="middle" class="dim">[ animated gif · 280×160 ]</text>
+  <text x="1040" y="590" text-anchor="middle" class="dim ital">(via Kitty graphics protocol)</text>
+
+  <line class="border" x1="781" y1="666" x2="1264" y2="666"/>
+  <text x="786" y="688" class="dim">›</text>
+  <text x="800" y="688" class="fg">type a message…</text>
+
+  <!-- footer -->
+  <text x="14"  y="715" class="muted">RT ok 1s</text>
+  <text x="160" y="715" class="red titleb">Mentions: client-acme: 2@ (Ctrl+N)</text>
+  <text x="1266" y="715" text-anchor="end" class="dim">Ctrl+Q quit · Ctrl+V/B split · Ctrl+U colors</text>
+</svg>

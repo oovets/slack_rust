@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <style>
+    .bg     { fill: #11151c; }
+    .panel  { fill: #11151c; stroke: #2a313c; stroke-width: 1; }
+    .border { stroke: #2a313c; stroke-width: 1; fill: none; }
+    .focus  { stroke: #5fafff; stroke-width: 1; fill: none; }
+    .dim    { fill: #6c7480; }
+    .fg     { fill: #c9d1d9; }
+    .muted  { fill: #8b95a5; }
+    .blue   { fill: #5fafff; }
+    .green  { fill: #7bd88f; }
+    .yellow { fill: #e5c07b; }
+    .red    { fill: #f07178; }
+    .magenta{ fill: #c678dd; }
+    .cyan   { fill: #56b6c2; }
+    .me     { fill: #98c379; }
+    .header { fill: #8b95a5; font-weight: 600; letter-spacing: 0.5px; }
+    .titleb { font-weight: 600; }
+    .badge  { fill: #f07178; font-weight: 600; }
+  </style>
+
+  <!-- terminal background -->
+  <rect class="bg" width="1100" height="620"/>
+
+  <!-- title bar (mock terminal chrome) -->
+  <rect x="0" y="0" width="1100" height="22" fill="#1b2129"/>
+  <circle cx="14" cy="11" r="5" fill="#f07178"/>
+  <circle cx="32" cy="11" r="5" fill="#e5c07b"/>
+  <circle cx="50" cy="11" r="5" fill="#7bd88f"/>
+  <text x="550" y="15" text-anchor="middle" class="dim">slack — rust TUI client</text>
+
+  <!-- left: chat list panel -->
+  <rect class="panel" x="8" y="30" width="240" height="560"/>
+  <text x="20" y="50" class="header">CHATS</text>
+
+  <!-- New (unread) section -->
+  <text x="20" y="74" class="muted">▾ New</text>
+  <text x="32" y="92"  class="fg">(3) # general</text>
+  <text x="32" y="110" class="fg">(1) 👤 alice</text>
+  <text x="32" y="128" class="fg">(7) 🔒 platform-team</text>
+
+  <!-- Public -->
+  <text x="20" y="156" class="muted">▾ Public</text>
+  <text x="32" y="174" class="fg"># announcements</text>
+  <text x="32" y="192" class="fg"># engineering</text>
+  <text x="32" y="210" class="fg"># random</text>
+
+  <!-- Private -->
+  <text x="20" y="238" class="muted">▾ Private</text>
+  <text x="32" y="256" class="fg">🔒 secret-launch</text>
+
+  <!-- DMs -->
+  <text x="20" y="284" class="muted">▾ Direct messages</text>
+  <text x="32" y="302" class="fg">👤 bob</text>
+  <text x="32" y="320" class="fg">👤 carol</text>
+  <text x="32" y="338" class="fg">👤 dave</text>
+
+  <!-- Group -->
+  <text x="20" y="366" class="muted">▾ Group</text>
+  <text x="32" y="384" class="fg">👥 design-sync</text>
+
+  <!-- Bots -->
+  <text x="20" y="412" class="muted">▾ Bots</text>
+  <text x="32" y="430" class="fg">🤖 github</text>
+  <text x="32" y="448" class="fg">🤖 pagerduty</text>
+
+  <!-- right side: split into two panes -->
+  <!-- top pane: # general (focused) -->
+  <rect class="panel" x="256" y="30" width="836" height="290"/>
+  <rect class="focus" x="256.5" y="30.5" width="835" height="289"/>
+  <text x="270" y="50" class="blue titleb"># general</text>
+  <text x="1078" y="50" text-anchor="end" class="dim">42 msgs · live</text>
+
+  <!-- messages -->
+  <text x="270" y="78"  class="muted">10:14</text>
+  <text x="318" y="78"  class="cyan titleb">alice</text>
+  <text x="372" y="78"  class="fg">morning everyone — anyone seen the staging deploy logs?</text>
+
+  <text x="270" y="100" class="muted">10:15</text>
+  <text x="318" y="100" class="magenta titleb">bob</text>
+  <text x="362" y="100" class="fg">looks green from my side, the </text>
+  <text x="555" y="100" class="green">k8s rollout</text>
+  <text x="635" y="100" class="fg"> finished a few minutes ago</text>
+
+  <text x="270" y="122" class="muted">10:16</text>
+  <text x="318" y="122" class="yellow titleb">carol</text>
+  <text x="370" y="122" class="fg">@stefan can you double check the </text>
+  <text x="582" y="122" class="green">migration script</text>
+  <text x="700" y="122" class="fg"> before we cut?</text>
+
+  <text x="270" y="144" class="muted">10:17</text>
+  <text x="318" y="144" class="me titleb">stefan (you)</text>
+  <text x="416" y="144" class="fg">on it — pulling latest now</text>
+
+  <text x="270" y="170" class="dim">↳ 3 replies · last 10:21</text>
+
+  <text x="270" y="200" class="muted">10:22</text>
+  <text x="318" y="200" class="cyan titleb">alice</text>
+  <text x="372" y="200" class="fg">🎉 staging is back, thanks</text>
+
+  <text x="270" y="222" class="muted">10:24</text>
+  <text x="318" y="222" class="red titleb">github-bot</text>
+  <text x="406" y="222" class="fg">PR #482 merged: "Restore realtime status footer"</text>
+
+  <!-- input row -->
+  <line class="border" x1="265" y1="282" x2="1083" y2="282"/>
+  <text x="270" y="302" class="dim">›</text>
+  <text x="284" y="302" class="fg">type a message…</text>
+  <text x="1078" y="302" text-anchor="end" class="dim">↵ send  /help</text>
+
+  <!-- bottom pane: thread -->
+  <rect class="panel" x="256" y="328" width="836" height="240"/>
+  <text x="270" y="348" class="blue titleb">↳ thread · # general / 10:17</text>
+  <text x="1078" y="348" text-anchor="end" class="dim">3 replies</text>
+
+  <text x="270" y="376" class="muted">10:19</text>
+  <text x="318" y="376" class="me titleb">stefan</text>
+  <text x="380" y="376" class="fg">script looks fine, dry-run is clean</text>
+
+  <text x="270" y="398" class="muted">10:20</text>
+  <text x="318" y="398" class="yellow titleb">carol</text>
+  <text x="370" y="398" class="fg">perfect, ship it 🚀</text>
+
+  <text x="270" y="420" class="muted">10:21</text>
+  <text x="318" y="420" class="magenta titleb">bob</text>
+  <text x="362" y="420" class="fg">added a quick note in the runbook</text>
+
+  <text x="270" y="450" class="dim">— end of thread —</text>
+
+  <!-- input row for thread -->
+  <line class="border" x1="265" y1="530" x2="1083" y2="530"/>
+  <text x="270" y="550" class="dim">›</text>
+  <text x="284" y="550" class="fg">reply in thread…</text>
+
+  <!-- footer (transparent, just text) -->
+  <text x="14"  y="608" class="muted">RT ok 2s</text>
+  <text x="160" y="608" class="yellow titleb">Mentions in other workspaces: client-acme: 2@ (Ctrl+N to switch)</text>
+  <text x="1086" y="608" text-anchor="end" class="dim">Ctrl+Q quit · Ctrl+V/B split · Ctrl+N workspaces</text>
+</svg>

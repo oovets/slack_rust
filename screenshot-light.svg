@@ -1,0 +1,238 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <style>
+    .bg     { fill: #f5f1e8; }
+    .panel  { fill: #fbf8f0; stroke: #d8cfb8; stroke-width: 1; }
+    .focus  { stroke: #1a73e8; stroke-width: 1; fill: none; }
+    .border { stroke: #d8cfb8; stroke-width: 1; fill: none; }
+    .dim    { fill: #8a8470; }
+    .fg     { fill: #2b2820; }
+    .muted  { fill: #6e6957; }
+    .blue   { fill: #1a4f9e; }
+    .green  { fill: #2f7a3a; }
+    .yellow { fill: #b87b00; }
+    .red    { fill: #b8362f; }
+    .magenta{ fill: #8e3da6; }
+    .cyan   { fill: #1a7984; }
+    .me     { fill: #2f7a3a; }
+    .header { fill: #6e6957; font-weight: 600; letter-spacing: 0.5px; }
+    .titleb { font-weight: 600; }
+    .bold   { font-weight: 700; }
+    .ital   { font-style: italic; }
+    .under  { text-decoration: underline; }
+    .codebg { fill: #ece6d4; }
+    .codefg { fill: #6b4f00; }
+    .pillm  { fill: #ffffff; font-weight: 600; }
+    .pillbg-mention { fill: #2851a8; }
+    .pillbg-bcast   { fill: #b8362f; }
+    .pillbg-react   { fill: #d8cfb8; }
+    .pillrf { fill: #2b2820; font-weight: 600; }
+    .barbg-red    { fill: #c44a44; }
+    .cardbar      { fill: #b87b00; }
+    .activerow    { fill: #c5d9f5; }
+  </style>
+
+  <rect class="bg" width="1280" height="720"/>
+
+  <rect x="0" y="0" width="1280" height="22" fill="#e8e0c8"/>
+  <circle cx="14" cy="11" r="5" fill="#b8362f"/>
+  <circle cx="32" cy="11" r="5" fill="#b87b00"/>
+  <circle cx="50" cy="11" r="5" fill="#2f7a3a"/>
+  <text x="640" y="15" text-anchor="middle" class="dim">slack — rust TUI client (light)</text>
+
+  <rect class="panel" x="8" y="30" width="250" height="680"/>
+  <text x="20" y="50" class="header">CHATS</text>
+
+  <!-- Threads section -->
+  <text x="20" y="74" class="muted">▾ Threads</text>
+  <rect x="14" y="82" width="238" height="18" class="barbg-red"/>
+  <text x="32" y="95" class="pillm">↳ #launch · 09:42 (3)</text>
+  <text x="32" y="115" class="fg">↳ #design · 09:18</text>
+  <text x="32" y="133" class="fg">↳ priya · 08:55</text>
+
+  <!-- New -->
+  <text x="20" y="160" class="muted">▾ New</text>
+  <rect x="14" y="168" width="238" height="18" class="barbg-red"/>
+  <text x="32" y="181" class="pillm">  #launch (4)</text>
+  <text x="32" y="201" class="fg">  priya (2)</text>
+
+  <!-- Public — design active -->
+  <text x="20" y="228" class="muted">▾ Public Channels</text>
+  <text x="32" y="246" class="fg"># announcements</text>
+  <rect x="14" y="254" width="238" height="18" class="activerow"/>
+  <text x="32" y="267" class="fg titleb">  # design</text>
+  <text x="32" y="287" class="fg"># product</text>
+  <text x="32" y="305" class="fg"># marketing</text>
+
+  <text x="20" y="333" class="muted">▾ Private Channels</text>
+  <text x="32" y="351" class="fg">🔒 launch-room</text>
+
+  <text x="20" y="379" class="muted">▾ DMs</text>
+  <text x="32" y="397" class="fg">👤 priya</text>
+  <text x="32" y="415" class="fg">👤 jordan</text>
+  <text x="32" y="433" class="fg">👤 mei</text>
+
+  <text x="20" y="461" class="muted">▾ Group Chats</text>
+  <text x="32" y="479" class="fg">👥 founders</text>
+
+  <text x="20" y="507" class="muted">▾ Bots &amp; Apps</text>
+  <text x="32" y="525" class="fg">🤖 figma-bot</text>
+  <text x="32" y="543" class="fg">🤖 statuspage</text>
+
+  <!-- ===== TOP LEFT: # design (focused) ===== -->
+  <rect class="panel" x="266" y="30" width="502" height="336"/>
+  <rect class="focus" x="266.5" y="30.5" width="501" height="335"/>
+  <text x="280" y="50" class="blue titleb"># design</text>
+  <text x="754" y="50" text-anchor="end" class="dim">live</text>
+
+  <text x="280" y="76" class="dim">[09:14]</text>
+  <text x="332" y="76" class="cyan titleb">priya</text>
+  <text x="408" y="76" class="fg">new mocks for the landing page are</text>
+  <text x="408" y="92" class="fg">ready — needs ~30 min review</text>
+
+  <!-- attachment card -->
+  <rect x="408" y="100" width="6" height="78" class="cardbar"/>
+  <text x="422" y="112" class="bold fg">@figma-bot · Landing v3</text>
+  <text x="422" y="130" class="muted ital">3 frames updated</text>
+  <text x="422" y="148" class="fg">▸ hero CTA simplified</text>
+  <text x="422" y="164" class="fg">▸ pricing table redesigned</text>
+  <text x="422" y="178" class="dim">— figma.com/file/landing-v3</text>
+
+  <text x="280" y="200" class="dim">[09:18]</text>
+  <text x="332" y="200" class="magenta titleb">jordan</text>
+  <rect x="408" y="187" width="76" height="18" class="pillbg-mention"/>
+  <text x="412" y="200" class="pillm">@stefan</text>
+  <text x="490" y="200" class="fg">thoughts on the hero copy?</text>
+
+  <!-- mention row red highlight -->
+  <rect x="269" y="208" width="496" height="18" fill="#f5d0c8"/>
+  <text x="280" y="221" class="red bold">[09:18]</text>
+  <text x="332" y="221" class="red bold">jordan</text>
+  <text x="408" y="221" class="red">↳ pinged you in #design</text>
+
+  <text x="280" y="248" class="dim">[09:22]</text>
+  <text x="332" y="248" class="me titleb">stefan</text>
+  <text x="408" y="248" class="fg">like the simplification, but</text>
+  <text x="408" y="264" class="fg">"build" feels off — </text>
+  <text x="528" y="264" class="bold fg">try "ship faster"</text>
+
+  <!-- reactions -->
+  <rect x="408" y="276" width="44" height="16" class="pillbg-react" rx="2"/>
+  <text x="412" y="288" class="pillrf">💯 4</text>
+  <rect x="456" y="276" width="40" height="16" class="pillbg-react" rx="2"/>
+  <text x="460" y="288" class="pillrf">🔥 2</text>
+
+  <text x="280" y="312" class="muted ital">↳ 5 replies · last 09:42</text>
+
+  <line class="border" x1="275" y1="328" x2="760" y2="328"/>
+  <text x="280" y="350" class="dim">›</text>
+  <text x="294" y="350" class="fg">type a message…</text>
+
+  <!-- ===== TOP RIGHT: # launch ===== -->
+  <rect class="panel" x="772" y="30" width="500" height="336"/>
+  <text x="786" y="50" class="red titleb"># launch</text>
+  <text x="1258" y="50" text-anchor="end" class="dim">4 unread</text>
+
+  <text x="786" y="76" class="dim">[09:35]</text>
+  <text x="838" y="76" class="yellow titleb">mei</text>
+  <text x="900" y="76" class="fg">PR copy is locked. Sending to</text>
+  <text x="900" y="92" class="fg">legal at noon.</text>
+
+  <text x="786" y="112" class="dim">[09:38]</text>
+  <text x="838" y="112" class="cyan titleb">priya</text>
+  <text x="900" y="112" class="fg">timeline check —</text>
+  <text x="1010" y="112" class="cyan under">launch-checklist</text>
+
+  <!-- ordered list rendering example -->
+  <text x="900" y="132" class="green">1.</text>
+  <text x="918" y="132" class="fg">final QA pass — Wed</text>
+  <text x="900" y="148" class="green">2.</text>
+  <text x="918" y="148" class="fg">press embargo lift — Thu 9am</text>
+  <text x="900" y="164" class="green">3.</text>
+  <text x="918" y="164" class="fg">marketing email — Thu 9:30am</text>
+
+  <text x="786" y="190" class="dim">[09:40]</text>
+  <text x="838" y="190" class="magenta titleb">jordan</text>
+  <text x="900" y="190" class="fg">we have</text>
+  <rect x="952" y="180" width="46" height="14" class="pillbg-bcast" rx="2"/>
+  <text x="955" y="190" class="pillm">@here</text>
+  <text x="1002" y="190" class="fg"> approval</text>
+
+  <text x="786" y="218" class="dim">[09:42]</text>
+  <text x="838" y="218" class="me titleb">stefan</text>
+  <text x="900" y="218" class="fg">🚀 ✨ let's go</text>
+
+  <!-- reactions -->
+  <rect x="900" y="232" width="40" height="16" class="pillbg-react" rx="2"/>
+  <text x="904" y="244" class="pillrf">🚀 8</text>
+  <rect x="944" y="232" width="40" height="16" class="pillbg-react" rx="2"/>
+  <text x="948" y="244" class="pillrf">🎉 5</text>
+
+  <text x="786" y="276" class="muted ital">↳ 3 replies · last 09:42</text>
+
+  <line class="border" x1="781" y1="328" x2="1264" y2="328"/>
+  <text x="786" y="350" class="dim">›</text>
+  <text x="800" y="350" class="fg">type a message…</text>
+
+  <!-- ===== BOTTOM LEFT: thread on # design ===== -->
+  <rect class="panel" x="266" y="372" width="502" height="334"/>
+  <text x="280" y="392" class="blue titleb">↳ thread · # design / 09:14</text>
+  <text x="754" y="392" text-anchor="end" class="dim">5 replies</text>
+
+  <text x="280" y="418" class="dim">[09:25]</text>
+  <text x="332" y="418" class="cyan titleb">priya</text>
+  <text x="408" y="418" class="fg">"ship faster" works for me</text>
+
+  <!-- blockquote example -->
+  <text x="280" y="446" class="dim">[09:28]</text>
+  <text x="332" y="446" class="magenta titleb">jordan</text>
+  <text x="408" y="446" class="cyan">▎</text>
+  <text x="424" y="446" class="muted ital">previous: "we help teams build"</text>
+  <text x="408" y="462" class="cyan">▎</text>
+  <text x="424" y="462" class="muted ital">new: "we help teams ship faster"</text>
+
+  <text x="280" y="492" class="dim">[09:32]</text>
+  <text x="332" y="492" class="yellow titleb">mei</text>
+  <text x="408" y="492" class="fg">also updating the meta tags —</text>
+  <text x="408" y="508" class="codefg">og:description</text>
+
+  <text x="280" y="540" class="dim">[09:42]</text>
+  <text x="332" y="540" class="me titleb">stefan</text>
+  <text x="408" y="540" class="fg">approved on my end ✅</text>
+
+  <text x="280" y="572" class="muted ital">— end of thread —</text>
+
+  <line class="border" x1="275" y1="666" x2="760" y2="666"/>
+  <text x="280" y="688" class="dim">›</text>
+  <text x="294" y="688" class="fg">reply in thread…</text>
+
+  <!-- ===== BOTTOM RIGHT: DM priya with image ===== -->
+  <rect class="panel" x="772" y="372" width="500" height="334"/>
+  <text x="786" y="392" class="blue titleb">👤 priya</text>
+  <text x="1258" y="392" text-anchor="end" class="dim">DM</text>
+
+  <text x="786" y="418" class="dim">[08:55]</text>
+  <text x="838" y="418" class="cyan titleb">priya</text>
+  <text x="900" y="418" class="fg">first dribble of the new icon set</text>
+
+  <!-- image preview placeholder -->
+  <rect x="900" y="430" width="280" height="160" fill="#fff" stroke="#1a7984" stroke-width="1"/>
+  <text x="1040" y="510" text-anchor="middle" class="dim">[ icon-set-v1.png · 280×160 ]</text>
+  <text x="1040" y="528" text-anchor="middle" class="dim ital">(Kitty inline preview)</text>
+
+  <text x="786" y="612" class="dim">[09:01]</text>
+  <text x="838" y="612" class="me titleb">stefan</text>
+  <text x="900" y="612" class="fg">love these — much warmer feel</text>
+
+  <text x="786" y="636" class="dim">[09:02]</text>
+  <text x="838" y="636" class="cyan titleb">priya</text>
+  <rect x="900" y="623" width="44" height="16" class="pillbg-react" rx="2"/>
+  <text x="904" y="635" class="pillrf">❤️ 1</text>
+
+  <line class="border" x1="781" y1="666" x2="1264" y2="666"/>
+  <text x="786" y="688" class="dim">›</text>
+  <text x="800" y="688" class="fg">type a message…</text>
+
+  <text x="14"  y="715" class="muted">RT ok 2s</text>
+  <text x="160" y="715" class="red titleb">Mentions: workspace-acme: 1@ (Ctrl+N)</text>
+  <text x="1266" y="715" text-anchor="end" class="dim">Ctrl+Q quit · Ctrl+V/B split · Ctrl+U colors</text>
+</svg>

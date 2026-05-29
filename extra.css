@@ -1,0 +1,156 @@
+/* smokemon docs theme override: a single dark-grey terminal surface.
+   The whole page now shares the same background as the code boxes (#1e1e1e),
+   the body text is monospace, and a blinking block cursor sits after the title
+   and the page heading to sell the terminal look. */
+
+:root,
+[data-md-color-scheme="slate"] {
+  /* code box colours (kept from the original terminal palette) */
+  --md-code-bg-color: #1e1e1e;   /* dark grey code background */
+  --md-code-fg-color: #5fd75f;   /* terminal green code text */
+
+  /* make the entire chrome share the code-box background */
+  --md-default-bg-color: #1e1e1e;            /* page body */
+  --md-default-fg-color: #c8d3c8;            /* soft green-grey body text */
+  --md-default-fg-color--light: #9fb39f;
+  --md-default-fg-color--lighter: #6f7f6f;
+  --md-default-fg-color--lightest: #3a3a3a;
+
+  /* header + footer + sidebars all flatten into the same surface */
+  --md-primary-fg-color: #1e1e1e;
+  --md-primary-bg-color: #5fd75f;            /* title / icons go terminal green */
+  --md-footer-bg-color: #1e1e1e;
+  --md-footer-bg-color--dark: #161616;
+  --md-footer-fg-color: #9fb39f;
+
+  /* links + accents in terminal green */
+  --md-accent-fg-color: #8ae234;
+  --md-typeset-a-color: #5fd75f;
+}
+
+/* one flat terminal surface: kill the header shadow/border seams */
+.md-header,
+.md-tabs,
+.md-footer,
+.md-footer-meta {
+  background-color: #1e1e1e;
+  box-shadow: none;
+}
+.md-header--shadow {
+  box-shadow: none;
+}
+
+/* the sidebars/nav share the same background instead of standing out */
+.md-sidebar,
+.md-nav {
+  background-color: #1e1e1e;
+}
+
+/* monospace everything so prose reads like terminal output */
+body,
+.md-typeset {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* headings stay green for the "prompt output" feel */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  color: #5fd75f;
+}
+
+/* fenced blocks (```), incl. plain no-language ones used across the docs.
+   A subtle green border makes each block read like its own framed terminal. */
+.md-typeset pre > code {
+  background-color: #1e1e1e;
+  color: #5fd75f;
+  border: 1px solid #2f3a2f;
+  border-radius: 4px;
+  /* one extra character of left padding so text isn't flush against the border */
+  padding-left: calc(1.18em + 1ch);
+  /* wrap long lines instead of scrolling sideways (lines that fit stay aligned) */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* inline `code`: slightly lighter so it stays legible inside prose */
+.md-typeset code {
+  background-color: #2b2b2b;
+  color: #8ae234;
+}
+
+/* keep the copy button from washing out against the dark block */
+.md-typeset .md-clipboard {
+  color: #5fd75f99;
+}
+.md-typeset .md-clipboard:hover {
+  color: #8ae234;
+}
+
+/* drop the duplicate "smokemon" site title shown above Home in the left sidebar */
+.md-nav--primary > .md-nav__title {
+  display: none;
+}
+
+/* lowercase every label in the nav + table of contents (incl. the page headings that
+   integrate into the menu under contributing / security) */
+.md-nav__link,
+.md-nav__title {
+  text-transform: lowercase;
+}
+
+/* no per-page H1 / title in the content area — the site name lives only in the top bar */
+.md-typeset h1 {
+  display: none;
+}
+
+/* tighter content column so code boxes aren't super wide; the header shares the same
+   width so the title lines up with the boxes below it */
+.md-grid {
+  max-width: 52rem;
+}
+.md-header__inner,
+.md-tabs__inner {
+  max-width: 52rem;
+  margin-inline: auto;
+}
+
+/* code boxes hug their text instead of stretching the full column (long lines scroll) */
+.md-typeset pre {
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* --- blinking terminal cursor ------------------------------------------- */
+@keyframes smokemon-blink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* block cursor that trails the site title in the header */
+.md-header__topic:first-child .md-ellipsis::after {
+  content: "\2588";                /* full block █ */
+  color: #5fd75f;
+  margin-left: 0.15em;
+  animation: smokemon-blink 1.05s steps(1) infinite;
+}
+
+/* and a matching cursor after the main page heading */
+.md-typeset h1::after {
+  content: "\2588";
+  color: #5fd75f;
+  margin-left: 0.12em;
+  font-weight: normal;
+  animation: smokemon-blink 1.05s steps(1) infinite;
+}
+
+/* respect users who ask for reduced motion: show a steady cursor */
+@media (prefers-reduced-motion: reduce) {
+  .md-header__topic:first-child .md-ellipsis::after,
+  .md-typeset h1::after {
+    animation: none;
+    opacity: 1;
+  }
+}
